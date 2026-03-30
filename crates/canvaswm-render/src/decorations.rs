@@ -101,11 +101,38 @@ void main() {
 }
 "#;
 
+/// Shader for corner clipping — drawn on top of window content to round corners.
+/// Outputs background color at the corners (outside rounded rect) and is transparent inside.
+pub const CORNER_CLIP_SHADER: &str = r#"
+precision mediump float;
+varying vec2 v_coords;
+uniform float alpha;
+uniform float u_radius;
+uniform vec2 u_size;
+uniform vec4 u_bg_color;
+
+float roundedBoxSDF(vec2 p, vec2 b, float r) {
+    vec2 d = abs(p) - b + vec2(r);
+    return length(max(d, 0.0)) - r;
+}
+
+void main() {
+    vec2 p = (v_coords - 0.5) * u_size;
+    vec2 halfSize = u_size * 0.5;
+    float dist = roundedBoxSDF(p, halfSize, u_radius);
+    // Inside rounded rect: transparent (window shows through)
+    // Outside rounded rect (corners): background color covers sharp edges
+    float outside = smoothstep(-0.5, 0.5, dist);
+    gl_FragColor = vec4(u_bg_color.rgb, u_bg_color.a * outside * alpha);
+}
+"#;
+
 /// Compiled decoration shader programs.
 pub struct DecorationShaders {
     pub shadow: GlesPixelProgram,
     pub border: GlesPixelProgram,
     pub title_bar: GlesPixelProgram,
+    pub corner_clip: GlesPixelProgram,
 }
 
 impl DecorationShaders {
@@ -145,7 +172,23 @@ impl DecorationShaders {
             )
             .map_err(|e| format!("Title bar shader: {e:?}"))?;
 
-        Ok(Self { shadow, border, title_bar })
+        let corner_clip = renderer
+            .compile_custom_pixel_shader(
+                CORNER_CLIP_SHADER,
+                &[
+                    UniformName::new("u_radius", UniformType::_1f),
+                    UniformName::new("u_size", UniformType::_2f),
+                    UniformName::new("u_bg_color", UniformType::_4f),
+                ],
+            )
+            .map_err(|e| format!("Corner clip shader: {e:?}"))?;
+
+        Ok(Self {
+            shadow,
+            border,
+            title_bar,
+            corner_clip,
+        })
     }
 
     /// Build shadow uniforms for a window.
@@ -183,6 +226,19 @@ impl DecorationShaders {
         vec![
             Uniform::new("u_color", color),
             Uniform::new("u_radius", radius),
+        ]
+    }
+
+    /// Build corner clip uniforms.
+    pub fn corner_clip_uniforms(
+        radius: f32,
+        size: (f32, f32),
+        bg_color: [f32; 4],
+    ) -> Vec<Uniform<'static>> {
+        vec![
+            Uniform::new("u_radius", radius),
+            Uniform::new("u_size", [size.0, size.1]),
+            Uniform::new("u_bg_color", bg_color),
         ]
     }
 }

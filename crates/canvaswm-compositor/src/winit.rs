@@ -1,12 +1,11 @@
-use std::time::Duration;
-
 use smithay::{
     backend::{
         renderer::{
             damage::OutputDamageTracker,
             element::{
-                solid::SolidColorRenderElement, surface::WaylandSurfaceRenderElement,
-                utils::RescaleRenderElement, Element, Id, Kind, RenderElement, UnderlyingStorage,
+                memory::MemoryRenderBufferRenderElement, solid::SolidColorRenderElement,
+                surface::WaylandSurfaceRenderElement, utils::RescaleRenderElement, Element, Id,
+                Kind, RenderElement, UnderlyingStorage,
             },
             gles::{
                 element::PixelShaderElement, GlesError, GlesFrame, GlesPixelProgram, GlesRenderer,
@@ -19,6 +18,7 @@ use smithay::{
     reexports::calloop::EventLoop,
     utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform},
 };
+use std::time::Duration;
 
 use canvaswm_render::decorations::DecorationShaders;
 
@@ -30,6 +30,7 @@ pub enum CanvasRenderElement {
     Rescaled(RescaleRenderElement<WaylandSurfaceRenderElement<GlesRenderer>>),
     DotGrid(SolidColorRenderElement),
     Shader(PixelShaderElement),
+    MemoryBuf(MemoryRenderBufferRenderElement<GlesRenderer>),
 }
 
 impl Element for CanvasRenderElement {
@@ -38,6 +39,7 @@ impl Element for CanvasRenderElement {
             Self::Rescaled(e) => e.id(),
             Self::DotGrid(e) => e.id(),
             Self::Shader(e) => e.id(),
+            Self::MemoryBuf(e) => e.id(),
         }
     }
 
@@ -46,6 +48,7 @@ impl Element for CanvasRenderElement {
             Self::Rescaled(e) => e.current_commit(),
             Self::DotGrid(e) => e.current_commit(),
             Self::Shader(e) => e.current_commit(),
+            Self::MemoryBuf(e) => e.current_commit(),
         }
     }
 
@@ -54,6 +57,7 @@ impl Element for CanvasRenderElement {
             Self::Rescaled(e) => e.src(),
             Self::DotGrid(e) => e.src(),
             Self::Shader(e) => e.src(),
+            Self::MemoryBuf(e) => e.src(),
         }
     }
 
@@ -62,6 +66,7 @@ impl Element for CanvasRenderElement {
             Self::Rescaled(e) => e.geometry(scale),
             Self::DotGrid(e) => e.geometry(scale),
             Self::Shader(e) => e.geometry(scale),
+            Self::MemoryBuf(e) => e.geometry(scale),
         }
     }
 
@@ -70,6 +75,7 @@ impl Element for CanvasRenderElement {
             Self::Rescaled(e) => e.transform(),
             Self::DotGrid(e) => e.transform(),
             Self::Shader(e) => e.transform(),
+            Self::MemoryBuf(e) => e.transform(),
         }
     }
 
@@ -82,6 +88,7 @@ impl Element for CanvasRenderElement {
             Self::Rescaled(e) => e.damage_since(scale, commit),
             Self::DotGrid(e) => e.damage_since(scale, commit),
             Self::Shader(e) => e.damage_since(scale, commit),
+            Self::MemoryBuf(e) => e.damage_since(scale, commit),
         }
     }
 
@@ -90,6 +97,7 @@ impl Element for CanvasRenderElement {
             Self::Rescaled(e) => e.opaque_regions(scale),
             Self::DotGrid(e) => e.opaque_regions(scale),
             Self::Shader(e) => e.opaque_regions(scale),
+            Self::MemoryBuf(e) => e.opaque_regions(scale),
         }
     }
 
@@ -98,6 +106,7 @@ impl Element for CanvasRenderElement {
             Self::Rescaled(e) => e.alpha(),
             Self::DotGrid(e) => e.alpha(),
             Self::Shader(e) => e.alpha(),
+            Self::MemoryBuf(e) => e.alpha(),
         }
     }
 
@@ -106,6 +115,7 @@ impl Element for CanvasRenderElement {
             Self::Rescaled(e) => e.kind(),
             Self::DotGrid(e) => e.kind(),
             Self::Shader(e) => e.kind(),
+            Self::MemoryBuf(e) => e.kind(),
         }
     }
 }
@@ -127,6 +137,9 @@ impl RenderElement<GlesRenderer> for CanvasRenderElement {
             Self::Shader(e) => {
                 RenderElement::<GlesRenderer>::draw(e, frame, src, dst, damage, opaque_regions)
             }
+            Self::MemoryBuf(e) => {
+                RenderElement::<GlesRenderer>::draw(e, frame, src, dst, damage, opaque_regions)
+            }
         }
     }
 
@@ -135,6 +148,7 @@ impl RenderElement<GlesRenderer> for CanvasRenderElement {
             Self::Rescaled(e) => e.underlying_storage(renderer),
             Self::DotGrid(e) => RenderElement::<GlesRenderer>::underlying_storage(e, renderer),
             Self::Shader(e) => RenderElement::<GlesRenderer>::underlying_storage(e, renderer),
+            Self::MemoryBuf(e) => RenderElement::<GlesRenderer>::underlying_storage(e, renderer),
         }
     }
 }
@@ -155,6 +169,12 @@ impl From<SolidColorRenderElement> for CanvasRenderElement {
 impl From<PixelShaderElement> for CanvasRenderElement {
     fn from(e: PixelShaderElement) -> Self {
         Self::Shader(e)
+    }
+}
+
+impl From<MemoryRenderBufferRenderElement<GlesRenderer>> for CanvasRenderElement {
+    fn from(e: MemoryRenderBufferRenderElement<GlesRenderer>) -> Self {
+        Self::MemoryBuf(e)
     }
 }
 
@@ -209,6 +229,38 @@ pub fn init_winit(
     } else {
         None
     };
+
+    // Load background image (if bg mode is "image")
+    let bg_image_buffer: Option<smithay::backend::renderer::element::memory::MemoryRenderBuffer> =
+        if state.config.background.mode == "image" {
+            match state.config.background.image_path.as_deref() {
+                Some(path) => match canvaswm_render::image_bg::load_image(path) {
+                    Ok(img) => {
+                        use smithay::backend::renderer::element::memory::MemoryRenderBuffer;
+                        let buf = MemoryRenderBuffer::from_slice(
+                            &img.data,
+                            smithay::backend::allocator::Fourcc::Abgr8888,
+                            (img.width as i32, img.height as i32),
+                            1,
+                            Transform::Normal,
+                            None,
+                        );
+                        tracing::info!("Background image loaded: {}x{}", img.width, img.height);
+                        Some(buf)
+                    }
+                    Err(e) => {
+                        tracing::error!("Background image error: {e}. Falling back to solid.");
+                        None
+                    }
+                },
+                None => {
+                    tracing::warn!("Background mode is 'image' but no image_path set.");
+                    None
+                }
+            }
+        } else {
+            None
+        };
 
     // Compile decoration shaders (shadow, border, title bar)
     let deco_shaders: Option<DecorationShaders> = {
@@ -280,51 +332,71 @@ pub fn init_winit(
                     let viewport = &state.viewport;
                     let zoom = viewport.zoom;
 
-                    // Background elements: either shader or dot grid
-                    let bg_elements: Vec<CanvasRenderElement> = if let Some(ref shader) = bg_shader
+                    // Non-renderer background elements (dots — no GPU needed)
+                    let mut dot_bg_elements: Option<Vec<CanvasRenderElement>> =
+                        if bg_shader.is_none() && bg_image_buffer.is_none() {
+                            Some(
+                                canvaswm_render::dot_grid::dot_grid_elements(
+                                    viewport,
+                                    (size.w, size.h),
+                                    state.config.background.dot_color,
+                                    state.config.background.grid_spacing,
+                                    state.config.background.dot_size,
+                                )
+                                .into_iter()
+                                .map(CanvasRenderElement::from)
+                                .collect(),
+                            )
+                        } else {
+                            None
+                        };
+
                     {
-                        // Shader background — full screen quad with viewport uniforms
-                        let elapsed = state.start_time.elapsed().as_secs_f32();
-                        let uniforms = canvaswm_render::shader_bg::build_uniforms(
-                            elapsed,
-                            (viewport.camera_x as f32, viewport.camera_y as f32),
-                            zoom as f32,
-                            (size.w as f32, size.h as f32),
-                        );
-                        let area = smithay::utils::Rectangle::from_size(smithay::utils::Size::<
-                            i32,
-                            smithay::utils::Logical,
-                        >::from(
-                            (
-                            size.w, size.h,
-                        )
-                        ));
-                        let element =
-                            smithay::backend::renderer::gles::element::PixelShaderElement::new(
+                        let (renderer, mut framebuffer) = backend.bind().unwrap();
+
+                        // Build background elements (some need the renderer)
+                        let bg_elements: Vec<CanvasRenderElement> = if let Some(ref shader) = bg_shader {
+                            // Animated shader background
+                            let elapsed = state.start_time.elapsed().as_secs_f32();
+                            let uniforms = canvaswm_render::shader_bg::build_uniforms(
+                                elapsed,
+                                (viewport.camera_x as f32, viewport.camera_y as f32),
+                                zoom as f32,
+                                (size.w as f32, size.h as f32),
+                            );
+                            let area = Rectangle::from_size(Size::<i32, Logical>::from((size.w, size.h)));
+                            let element = PixelShaderElement::new(
                                 shader.clone(),
                                 area,
                                 None,
                                 1.0,
                                 uniforms,
-                                smithay::backend::renderer::element::Kind::Unspecified,
+                                Kind::Unspecified,
                             );
-                        vec![CanvasRenderElement::Shader(element)]
-                    } else {
-                        // Dot grid background
-                        canvaswm_render::dot_grid::dot_grid_elements(
-                            viewport,
-                            (size.w, size.h),
-                            state.config.background.dot_color,
-                            state.config.background.grid_spacing,
-                            state.config.background.dot_size,
-                        )
-                        .into_iter()
-                        .map(CanvasRenderElement::from)
-                        .collect()
-                    };
-
-                    {
-                        let (renderer, mut framebuffer) = backend.bind().unwrap();
+                            vec![CanvasRenderElement::Shader(element)]
+                        } else if let Some(ref buf) = bg_image_buffer {
+                            // Still image background — stretched to fill screen
+                            use smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement;
+                            match MemoryRenderBufferRenderElement::from_buffer(
+                                renderer,
+                                Point::from((0.0, 0.0)),
+                                buf,
+                                None,    // alpha
+                                None,    // src crop
+                                Some(Size::<i32, Logical>::from((size.w, size.h))), // dst size (stretch to screen)
+                                Kind::Unspecified,
+                            ) {
+                                Ok(element) => vec![CanvasRenderElement::MemoryBuf(element)],
+                                Err(e) => {
+                                    tracing::error!("Failed to render bg image: {e:?}");
+                                    Vec::new()
+                                }
+                            }
+                        } else if let Some(dots) = dot_bg_elements.take() {
+                            dots
+                        } else {
+                            Vec::new() // solid color fallback (bg color handles it)
+                        };
 
                         // Map the output to the camera position for correct
                         // element_for_region culling.
@@ -362,10 +434,40 @@ pub fn init_winit(
                         let deco_elements =
                             generate_decoration_elements(state, &deco_shaders, zoom);
 
-                        // Compose: decorations behind windows, windows on top, bg at back
+                        // Generate corner clip elements (drawn on top of windows)
+                        let corner_clip_elements =
+                            generate_corner_clip_elements(state, &deco_shaders, zoom);
+
+                        // Generate minimap elements
+                        let minimap_windows: Vec<canvaswm_render::minimap::MinimapWindow> =
+                            state.space.elements().filter_map(|window| {
+                                let loc = state.space.element_location(window)?;
+                                let geo = window.geometry();
+                                let focused = state.focus_history.first().map_or(false, |f| f == window);
+                                Some(canvaswm_render::minimap::MinimapWindow {
+                                    x: loc.x as f64,
+                                    y: loc.y as f64,
+                                    w: geo.size.w as f64,
+                                    h: geo.size.h as f64,
+                                    focused,
+                                })
+                            }).collect();
+                        let minimap_elems: Vec<CanvasRenderElement> =
+                            canvaswm_render::minimap::minimap_elements(
+                                &state.viewport,
+                                (size.w, size.h),
+                                &minimap_windows,
+                            )
+                            .into_iter()
+                            .map(CanvasRenderElement::from)
+                            .collect();
+
+                        // Compose: minimap on top, corner clips above windows, windows, decorations behind, bg at back
                         let mut all_elements: Vec<CanvasRenderElement> = Vec::with_capacity(
-                            space_elements.len() + deco_elements.len() + bg_elements.len(),
+                            minimap_elems.len() + corner_clip_elements.len() + space_elements.len() + deco_elements.len() + bg_elements.len(),
                         );
+                        all_elements.extend(minimap_elems);
+                        all_elements.extend(corner_clip_elements);
                         all_elements.extend(space_elements);
                         all_elements.extend(deco_elements);
                         all_elements.extend(bg_elements);
@@ -526,6 +628,79 @@ fn generate_decoration_elements(
                 Kind::Unspecified,
             )));
         }
+    }
+
+    elements
+}
+
+/// Generate corner clip elements drawn on top of windows to round their corners.
+/// Uses the background color to paint over the sharp corners outside a rounded rect.
+fn generate_corner_clip_elements(
+    state: &CanvasWM,
+    deco_shaders: &Option<DecorationShaders>,
+    zoom: f64,
+) -> Vec<CanvasRenderElement> {
+    let deco_shaders = match deco_shaders {
+        Some(s) => s,
+        None => return Vec::new(),
+    };
+
+    let config = &state.config;
+    if !config.effects.corner_rounding || config.effects.corner_radius <= 0.0 {
+        return Vec::new();
+    }
+
+    let corner_radius = config.effects.corner_radius as f32;
+    let border_width = config.decorations.border_width as f32;
+    let bg_color = config.background.color;
+    let mut elements = Vec::new();
+
+    for window in state.space.elements() {
+        let Some(loc) = state.space.element_location(window) else {
+            continue;
+        };
+        let geo = window.geometry();
+        let bbox = window.bbox();
+
+        // Surface origin in canvas space (full surface including CSD)
+        let surf_x = loc.x as f64 - geo.loc.x as f64 + bbox.loc.x as f64;
+        let surf_y = loc.y as f64 - geo.loc.y as f64 + bbox.loc.y as f64;
+        let full_w = bbox.size.w as f64;
+        let full_h = bbox.size.h as f64;
+
+        // Extend the clip area outward to also cover the border element
+        let scaled_border = (border_width * zoom as f32).ceil() as i32;
+        let scaled_radius = corner_radius * zoom as f32;
+        // Outer radius must match the border shader's outer radius
+        let outer_radius = scaled_radius + scaled_border as f32;
+
+        let (screen_x, screen_y) = state.viewport.canvas_to_screen(surf_x, surf_y);
+        let screen_w = (full_w * zoom) as i32;
+        let screen_h = (full_h * zoom) as i32;
+
+        // Clip area extends beyond window surface by border width on all sides
+        let clip_x = screen_x as i32 - scaled_border;
+        let clip_y = screen_y as i32 - scaled_border;
+        let clip_w = screen_w + scaled_border * 2;
+        let clip_h = screen_h + scaled_border * 2;
+
+        let area = Rectangle::new(
+            Point::<i32, Logical>::from((clip_x, clip_y)),
+            Size::<i32, Logical>::from((clip_w, clip_h)),
+        );
+        let uniforms = DecorationShaders::corner_clip_uniforms(
+            outer_radius,
+            (clip_w as f32, clip_h as f32),
+            bg_color,
+        );
+        elements.push(CanvasRenderElement::Shader(PixelShaderElement::new(
+            deco_shaders.corner_clip.clone(),
+            area,
+            None,
+            1.0,
+            uniforms,
+            Kind::Unspecified,
+        )));
     }
 
     elements

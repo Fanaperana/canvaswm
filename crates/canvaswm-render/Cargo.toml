@@ -8,3 +8,4 @@ edition.workspace = true
 canvaswm-canvas = { workspace = true }
 smithay = { workspace = true }
 dirs = { workspace = true }
+image = { workspace = true }

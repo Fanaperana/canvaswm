@@ -121,10 +121,14 @@ pub struct EffectsConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct BackgroundConfig {
-    /// "shader" or "dots" or "solid".
+    /// "shader", "dots", "solid", or "image".
     pub mode: String,
-    /// Path to custom GLSL fragment shader.
+    /// Path to custom GLSL fragment shader (for mode "shader").
     pub shader_path: Option<String>,
+    /// Path to background image file (for mode "image"). Supports PNG, JPEG, WebP.
+    pub image_path: Option<String>,
+    /// Image display mode: "stretch", "fill", "center", "tile".
+    pub image_mode: String,
     /// Solid background color [r, g, b, a] (0.0–1.0).
     pub color: [f32; 4],
     /// Dot grid spacing in canvas pixels.
@@ -306,7 +310,7 @@ impl Default for EffectsConfig {
             shadows: true,
             shadow_radius: 14.0,
             corner_rounding: true,
-            corner_radius: 8.0,
+            corner_radius: 12.0,
         }
     }
 }
@@ -316,6 +320,8 @@ impl Default for BackgroundConfig {
         Self {
             mode: "dots".into(),
             shader_path: None,
+            image_path: None,
+            image_mode: "fill".into(),
             color: [0.118, 0.118, 0.180, 1.0], // Catppuccin Mocha base
             grid_spacing: 60.0,
             dot_size: 2.0,
@@ -442,18 +448,14 @@ impl Config {
         let contents = std::fs::read_to_string(path)
             .map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
 
-        let ext = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
         match ext {
-            "toml" => toml::from_str(&contents)
-                .map_err(|e| format!("TOML parse error: {e}")),
-            "json" => serde_json::from_str(&contents)
-                .map_err(|e| format!("JSON parse error: {e}")),
-            "yaml" | "yml" => serde_yaml::from_str(&contents)
-                .map_err(|e| format!("YAML parse error: {e}")),
+            "toml" => toml::from_str(&contents).map_err(|e| format!("TOML parse error: {e}")),
+            "json" => serde_json::from_str(&contents).map_err(|e| format!("JSON parse error: {e}")),
+            "yaml" | "yml" => {
+                serde_yaml::from_str(&contents).map_err(|e| format!("YAML parse error: {e}"))
+            }
             _ => Err(format!("Unknown config format: .{ext}")),
         }
     }

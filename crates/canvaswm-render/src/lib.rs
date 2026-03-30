@@ -10,3 +10,4 @@ pub mod shader_bg;
 pub use background::Background;
 pub use decorations::{DecorationParams, DecorationShaders, WindowInfo};
 pub use element::CanvasRenderElement;
+pub use minimap::MinimapWindow;

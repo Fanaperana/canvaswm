@@ -3,9 +3,31 @@
 //! These are rendered as PixelShaderElement quads placed around/behind each window,
 //! using the canvas viewport zoom to scale correctly.
 
-use smithay::backend::renderer::gles::{
-    GlesPixelProgram, GlesRenderer, Uniform, UniformName, UniformType,
+use smithay::{
+    backend::renderer::{
+        element::Kind,
+        gles::{
+            element::PixelShaderElement, GlesPixelProgram, GlesRenderer, Uniform, UniformName,
+            UniformType,
+        },
+    },
+    utils::{Logical, Point, Rectangle, Size},
 };
+
+use crate::element::CanvasRenderElement;
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/// Default shadow color (black, semi-transparent).
+const SHADOW_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.6];
+
+/// Element render alpha (fully opaque shader).
+const ELEMENT_ALPHA: f32 = 1.0;
+
+/// Minimum screen-pixel width for a border element (1 px).
+const MIN_SCREEN_BORDER: i32 = 1;
 
 /// Shader for SSD title bar — solid colored bar above each window.
 pub const SSD_TITLE_BAR_SHADER: &str = r#"
@@ -241,4 +263,198 @@ impl DecorationShaders {
             Uniform::new("u_bg_color", bg_color),
         ]
     }
+}
+
+// ---------------------------------------------------------------------------
+// Window descriptor — decouples rendering from compositor state
+// ---------------------------------------------------------------------------
+
+/// Backend-agnostic description of a visible window for decoration rendering.
+///
+/// Collected by the compositor from its `Space` and passed into the render
+/// functions below, keeping the render crate free of compositor types.
+pub struct WindowInfo {
+    /// Screen-space position (already transformed from canvas via viewport).
+    pub screen_x: f64,
+    pub screen_y: f64,
+    /// Screen-space dimensions (content geometry × zoom).
+    pub screen_w: i32,
+    pub screen_h: i32,
+    /// Full surface bounding-box screen position (includes CSD frame).
+    pub bbox_screen_x: f64,
+    pub bbox_screen_y: f64,
+    /// Full surface bounding-box screen dimensions.
+    pub bbox_screen_w: i32,
+    pub bbox_screen_h: i32,
+    /// Whether this window currently has keyboard focus.
+    pub focused: bool,
+}
+
+/// Decoration configuration extracted from the global config.
+pub struct DecorationParams {
+    pub shadow_enabled: bool,
+    pub shadow_radius: f32,
+    pub corner_radius: f32,
+    pub border_width: f32,
+    pub ssd_mode: bool,
+    pub title_height: i32,
+    pub focused_color: [f32; 4],
+    pub unfocused_color: [f32; 4],
+    pub title_bar_color: [f32; 4],
+    pub bg_color: [f32; 4],
+}
+
+// ---------------------------------------------------------------------------
+// Decoration element generation
+// ---------------------------------------------------------------------------
+
+/// Generate shadow, border, and title-bar elements for every visible window.
+///
+/// These are rendered *behind* window surfaces in the compositor layer stack.
+pub fn generate_decoration_elements(
+    shaders: &DecorationShaders,
+    windows: &[WindowInfo],
+    params: &DecorationParams,
+    zoom: f64,
+) -> Vec<CanvasRenderElement> {
+    let mut elements = Vec::new();
+
+    let scaled_radius = params.corner_radius * zoom as f32;
+    let scaled_border = params.border_width * zoom as f32;
+    let scaled_shadow_radius = params.shadow_radius * zoom as f32;
+
+    for win in windows {
+        let border_color = if win.focused {
+            params.focused_color
+        } else {
+            params.unfocused_color
+        };
+
+        // Shadow
+        if params.shadow_enabled && params.shadow_radius > 0.0 {
+            let spread = scaled_shadow_radius;
+            let sx = win.screen_x as i32 - spread as i32;
+            let sy = win.screen_y as i32 - spread as i32;
+            let sw = win.screen_w + spread as i32 * 2;
+            let sh = win.screen_h + spread as i32 * 2;
+
+            let area = Rectangle::new(
+                Point::<i32, Logical>::from((sx, sy)),
+                Size::<i32, Logical>::from((sw, sh)),
+            );
+            let uniforms = DecorationShaders::shadow_uniforms(
+                SHADOW_COLOR,
+                scaled_radius,
+                (win.screen_w as f32, win.screen_h as f32),
+                spread,
+            );
+            elements.push(CanvasRenderElement::Shader(PixelShaderElement::new(
+                shaders.shadow.clone(),
+                area,
+                None,
+                ELEMENT_ALPHA,
+                uniforms,
+                Kind::Unspecified,
+            )));
+        }
+
+        // Border
+        if params.border_width > 0.0 {
+            let bw = (scaled_border.ceil() as i32).max(MIN_SCREEN_BORDER);
+            let area = Rectangle::new(
+                Point::<i32, Logical>::from((win.screen_x as i32 - bw, win.screen_y as i32 - bw)),
+                Size::<i32, Logical>::from((win.screen_w + bw * 2, win.screen_h + bw * 2)),
+            );
+            let uniforms = DecorationShaders::border_uniforms(
+                border_color,
+                scaled_radius + scaled_border,
+                scaled_border,
+                ((win.screen_w + bw * 2) as f32, (win.screen_h + bw * 2) as f32),
+            );
+            elements.push(CanvasRenderElement::Shader(PixelShaderElement::new(
+                shaders.border.clone(),
+                area,
+                None,
+                ELEMENT_ALPHA,
+                uniforms,
+                Kind::Unspecified,
+            )));
+        }
+
+        // SSD title bar
+        if params.ssd_mode {
+            let th = (params.title_height as f64 * zoom) as i32;
+            let area = Rectangle::new(
+                Point::<i32, Logical>::from((win.screen_x as i32, win.screen_y as i32 - th)),
+                Size::<i32, Logical>::from((win.screen_w, th)),
+            );
+            let uniforms = DecorationShaders::title_bar_uniforms(
+                params.title_bar_color,
+                scaled_radius / win.screen_w.max(1) as f32,
+            );
+            elements.push(CanvasRenderElement::Shader(PixelShaderElement::new(
+                shaders.title_bar.clone(),
+                area,
+                None,
+                ELEMENT_ALPHA,
+                uniforms,
+                Kind::Unspecified,
+            )));
+        }
+    }
+
+    elements
+}
+
+// ---------------------------------------------------------------------------
+// Corner clip element generation
+// ---------------------------------------------------------------------------
+
+/// Generate corner-clip overlay elements drawn *on top* of window content.
+///
+/// Uses the background colour to paint over sharp corners outside a rounded
+/// rectangle, covering both the window surface (including CSD frame) and the
+/// border decoration area.
+pub fn generate_corner_clip_elements(
+    shaders: &DecorationShaders,
+    windows: &[WindowInfo],
+    params: &DecorationParams,
+    zoom: f64,
+) -> Vec<CanvasRenderElement> {
+    if params.corner_radius <= 0.0 {
+        return Vec::new();
+    }
+
+    let scaled_radius = params.corner_radius * zoom as f32;
+    let scaled_border = (params.border_width * zoom as f32).ceil() as i32;
+    let outer_radius = scaled_radius + scaled_border as f32;
+
+    let mut elements = Vec::with_capacity(windows.len());
+
+    for win in windows {
+        let clip_x = win.bbox_screen_x as i32 - scaled_border;
+        let clip_y = win.bbox_screen_y as i32 - scaled_border;
+        let clip_w = win.bbox_screen_w + scaled_border * 2;
+        let clip_h = win.bbox_screen_h + scaled_border * 2;
+
+        let area = Rectangle::new(
+            Point::<i32, Logical>::from((clip_x, clip_y)),
+            Size::<i32, Logical>::from((clip_w, clip_h)),
+        );
+        let uniforms = DecorationShaders::corner_clip_uniforms(
+            outer_radius,
+            (clip_w as f32, clip_h as f32),
+            params.bg_color,
+        );
+        elements.push(CanvasRenderElement::Shader(PixelShaderElement::new(
+            shaders.corner_clip.clone(),
+            area,
+            None,
+            ELEMENT_ALPHA,
+            uniforms,
+            Kind::Unspecified,
+        )));
+    }
+
+    elements
 }

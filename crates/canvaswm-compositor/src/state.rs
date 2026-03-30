@@ -338,9 +338,7 @@ impl CanvasWM {
             ))
         });
 
-        if let Some(target) =
-            canvaswm_canvas::find_nearest(origin, dir, items, focused.as_ref())
-        {
+        if let Some(target) = canvaswm_canvas::find_nearest(origin, dir, items, focused.as_ref()) {
             let serial = smithay::utils::SERIAL_COUNTER.next_serial();
             self.space.raise_element(&target, true);
             if let Some(surface) = target.toplevel().map(|t| t.wl_surface().clone()) {
@@ -394,7 +392,8 @@ impl CanvasWM {
     fn lerp_speed(&self, t: f64) -> f64 {
         let t = t.clamp(0.0, 1.0);
         let t2 = t * t; // quadratic ramp
-        self.config.edge_pan.speed_min + t2 * (self.config.edge_pan.speed_max - self.config.edge_pan.speed_min)
+        self.config.edge_pan.speed_min
+            + t2 * (self.config.edge_pan.speed_max - self.config.edge_pan.speed_min)
     }
 
     /// Apply edge pan velocity to camera (call each frame during a grab).

@@ -359,11 +359,8 @@ pub fn init_winit(
                             .collect();
 
                         // Generate decoration elements (shadows, borders, title bars)
-                        let deco_elements = generate_decoration_elements(
-                            state,
-                            &deco_shaders,
-                            zoom,
-                        );
+                        let deco_elements =
+                            generate_decoration_elements(state, &deco_shaders, zoom);
 
                         // Compose: decorations behind windows, windows on top, bg at back
                         let mut all_elements: Vec<CanvasRenderElement> = Vec::with_capacity(

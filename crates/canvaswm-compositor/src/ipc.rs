@@ -11,7 +11,6 @@
 //! - `{"cmd": "set_zoom", "zoom": 0.5}` — set zoom level
 //! - `{"cmd": "pan_to", "x": 100, "y": 200}` — pan camera
 //! - `{"cmd": "reload_config"}` — hot-reload config
-//! - `{"cmd": "exec", "command": "..."}` — run a shell command
 //! - `{"cmd": "navigate", "direction": "left|right|up|down"}`
 
 use serde::{Deserialize, Serialize};
@@ -38,6 +37,7 @@ pub struct IpcRequest {
     #[serde(default)]
     pub y: Option<f64>,
     #[serde(default)]
+    #[allow(dead_code)]
     pub command: Option<String>,
     #[serde(default)]
     pub direction: Option<String>,
@@ -176,16 +176,17 @@ fn handle_request(req: &IpcRequest, state: &mut CanvasWM) -> IpcResponse {
                         .toplevel()
                         .map(|t| {
                             compositor::with_states(t.wl_surface(), |states| {
-                                let attrs = states
+                                states
                                     .data_map
                                     .get::<XdgToplevelSurfaceData>()
-                                    .unwrap()
-                                    .lock()
-                                    .unwrap();
-                                (
-                                    attrs.app_id.clone().unwrap_or_default(),
-                                    attrs.title.clone().unwrap_or_default(),
-                                )
+                                    .map(|data| {
+                                        let attrs = data.lock().unwrap();
+                                        (
+                                            attrs.app_id.clone().unwrap_or_default(),
+                                            attrs.title.clone().unwrap_or_default(),
+                                        )
+                                    })
+                                    .unwrap_or_default()
                             })
                         })
                         .unwrap_or_default();
@@ -197,7 +198,7 @@ fn handle_request(req: &IpcRequest, state: &mut CanvasWM) -> IpcResponse {
                         height: geo.size.h,
                         app_id,
                         title,
-                        focused: focused.map_or(false, |f| f == w),
+                        focused: focused == Some(w),
                     }
                 })
                 .collect();
@@ -240,17 +241,9 @@ fn handle_request(req: &IpcRequest, state: &mut CanvasWM) -> IpcResponse {
             IpcResponse::ok()
         }
         "exec" => {
-            let Some(ref cmd) = req.command else {
-                return IpcResponse::error("missing 'command' field");
-            };
-            match std::process::Command::new("sh")
-                .arg("-c")
-                .arg(cmd)
-                .spawn()
-            {
-                Ok(_) => IpcResponse::ok(),
-                Err(e) => IpcResponse::error(format!("exec error: {e}")),
-            }
+            // Disabled: arbitrary shell execution via IPC is a security risk.
+            // Use config-defined keybindings or autostart for launching commands.
+            IpcResponse::error("'exec' command is disabled for security reasons")
         }
         "navigate" => {
             let Some(ref dir) = req.direction else {

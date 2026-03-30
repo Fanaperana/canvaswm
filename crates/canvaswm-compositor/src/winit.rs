@@ -316,7 +316,7 @@ fn collect_window_infos(state: &CanvasWM, zoom: f64) -> Vec<WindowInfo> {
                 bbox_screen_y: bsy,
                 bbox_screen_w: (bbox.size.w as f64 * zoom) as i32,
                 bbox_screen_h: (bbox.size.h as f64 * zoom) as i32,
-                focused: focused.map_or(false, |f| f == window),
+                focused: focused == Some(window),
             })
         })
         .collect()
@@ -360,7 +360,7 @@ fn collect_minimap_windows(state: &CanvasWM) -> Vec<minimap::MinimapWindow> {
                 y: loc.y as f64,
                 w: geo.size.w as f64,
                 h: geo.size.h as f64,
-                focused: focused.map_or(false, |f| f == window),
+                focused: focused == Some(window),
             })
         })
         .collect()

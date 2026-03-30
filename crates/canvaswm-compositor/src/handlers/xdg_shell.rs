@@ -63,18 +63,18 @@ impl XdgShellHandler for CanvasWM {
     }
 
     fn move_request(&mut self, surface: ToplevelSurface, seat: wl_seat::WlSeat, serial: Serial) {
-        let seat = Seat::from_resource(&seat).unwrap();
+        let Some(seat) = Seat::from_resource(&seat) else { return };
         let wl_surface = surface.wl_surface();
 
         if let Some(start_data) = check_grab(&seat, wl_surface, serial) {
-            let pointer = seat.get_pointer().unwrap();
-            let window = self
+            let Some(pointer) = seat.get_pointer() else { return };
+            let Some(window) = self
                 .space
                 .elements()
-                .find(|w| w.toplevel().unwrap().wl_surface() == wl_surface)
-                .unwrap()
-                .clone();
-            let initial_window_location = self.space.element_location(&window).unwrap();
+                .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == wl_surface))
+                .cloned()
+            else { return };
+            let Some(initial_window_location) = self.space.element_location(&window) else { return };
 
             let grab = MoveSurfaceGrab {
                 start_data,
@@ -93,18 +93,18 @@ impl XdgShellHandler for CanvasWM {
         serial: Serial,
         edges: xdg_toplevel::ResizeEdge,
     ) {
-        let seat = Seat::from_resource(&seat).unwrap();
+        let Some(seat) = Seat::from_resource(&seat) else { return };
         let wl_surface = surface.wl_surface();
 
         if let Some(start_data) = check_grab(&seat, wl_surface, serial) {
-            let pointer = seat.get_pointer().unwrap();
-            let window = self
+            let Some(pointer) = seat.get_pointer() else { return };
+            let Some(window) = self
                 .space
                 .elements()
-                .find(|w| w.toplevel().unwrap().wl_surface() == wl_surface)
-                .unwrap()
-                .clone();
-            let initial_window_location = self.space.element_location(&window).unwrap();
+                .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == wl_surface))
+                .cloned()
+            else { return };
+            let Some(initial_window_location) = self.space.element_location(&window) else { return };
             let initial_window_size = window.geometry().size;
 
             surface.with_pending_state(|state| {
@@ -152,21 +152,20 @@ fn check_grab(
 pub fn handle_commit(popups: &mut PopupManager, space: &Space<Window>, surface: &WlSurface) {
     if let Some(window) = space
         .elements()
-        .find(|w| w.toplevel().unwrap().wl_surface() == surface)
+        .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == surface))
         .cloned()
     {
         let initial_configure_sent = with_states(surface, |states| {
             states
                 .data_map
                 .get::<XdgToplevelSurfaceData>()
-                .unwrap()
-                .lock()
-                .unwrap()
-                .initial_configure_sent
+                .is_none_or(|data| data.lock().unwrap().initial_configure_sent)
         });
 
         if !initial_configure_sent {
-            window.toplevel().unwrap().send_configure();
+            if let Some(toplevel) = window.toplevel() {
+                toplevel.send_configure();
+            }
         }
     }
 
@@ -191,14 +190,14 @@ impl CanvasWM {
         let Some(window) = self
             .space
             .elements()
-            .find(|w| w.toplevel().unwrap().wl_surface() == &root)
+            .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == &root))
         else {
             return;
         };
 
-        let output = self.space.outputs().next().unwrap();
-        let output_geo = self.space.output_geometry(output).unwrap();
-        let window_geo = self.space.element_geometry(window).unwrap();
+        let Some(output) = self.space.outputs().next() else { return };
+        let Some(output_geo) = self.space.output_geometry(output) else { return };
+        let Some(window_geo) = self.space.element_geometry(window) else { return };
 
         let mut target = output_geo;
         target.loc -= get_popup_toplevel_coords(&PopupKind::Xdg(popup.clone()));

@@ -135,10 +135,12 @@ impl CanvasWM {
         let ipc_listener = crate::ipc::create_listener();
 
         // Apply config to viewport
-        let mut viewport = Viewport::default();
-        viewport.snap_threshold = config.zoom.snap_threshold;
-        viewport.max_zoom = config.zoom.max_zoom;
-        viewport.animation_speed = config.navigation.animation_speed;
+        let viewport = Viewport {
+            snap_threshold: config.zoom.snap_threshold,
+            max_zoom: config.zoom.max_zoom,
+            animation_speed: config.navigation.animation_speed,
+            ..Default::default()
+        };
 
         Self {
             start_time,

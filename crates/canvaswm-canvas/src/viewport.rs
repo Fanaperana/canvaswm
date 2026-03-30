@@ -207,7 +207,7 @@ impl Viewport {
                 self.zoom = target_zoom;
                 self.zoom_target = None;
             } else {
-                self.zoom = self.zoom + dz * factor;
+                self.zoom += dz * factor;
             }
             changed = true;
         }

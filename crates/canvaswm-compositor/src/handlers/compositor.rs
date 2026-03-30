@@ -24,7 +24,7 @@ impl CompositorHandler for CanvasWM {
     }
 
     fn client_compositor_state<'a>(&self, client: &'a Client) -> &'a CompositorClientState {
-        &client.get_data::<ClientState>().unwrap().compositor_state
+        &client.get_data::<ClientState>().expect("client missing ClientState").compositor_state
     }
 
     fn commit(&mut self, surface: &WlSurface) {
@@ -37,7 +37,7 @@ impl CompositorHandler for CanvasWM {
             if let Some(window) = self
                 .space
                 .elements()
-                .find(|w| w.toplevel().unwrap().wl_surface() == &root)
+                .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == &root))
             {
                 window.on_commit();
             }

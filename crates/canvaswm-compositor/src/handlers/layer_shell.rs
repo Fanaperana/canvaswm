@@ -23,7 +23,7 @@ impl WlrLayerShellHandler for CanvasWM {
         // Resolve which output this layer surface targets
         let output = output
             .as_ref()
-            .and_then(|o| Output::from_resource(o))
+            .and_then(Output::from_resource)
             .or_else(|| self.space.outputs().next().cloned());
 
         let Some(output) = output else {

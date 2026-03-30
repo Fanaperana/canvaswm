@@ -95,6 +95,7 @@ impl Background {
     /// Produce the render elements for the current frame.
     ///
     /// `renderer` is only needed for the `Image` variant (texture upload).
+    #[allow(clippy::too_many_arguments)]
     pub fn render_elements(
         &self,
         renderer: &mut GlesRenderer,

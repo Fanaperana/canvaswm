@@ -50,7 +50,7 @@ impl CanvasWM {
         let key_code = event.key_code();
         let state = event.state();
 
-        let keyboard = self.seat.get_keyboard().unwrap();
+        let Some(keyboard) = self.seat.get_keyboard() else { return };
 
         let action = keyboard.input::<Action, _>(
             self,
@@ -154,9 +154,13 @@ impl CanvasWM {
             Action::CloseWindow => {
                 // Close focused window (most recent in focus history)
                 if let Some(window) = self.focus_history.first().cloned() {
-                    window.toplevel().unwrap().send_close();
+                    if let Some(toplevel) = window.toplevel() {
+                        toplevel.send_close();
+                    }
                 } else if let Some(window) = self.space.elements().last().cloned() {
-                    window.toplevel().unwrap().send_close();
+                    if let Some(toplevel) = window.toplevel() {
+                        toplevel.send_close();
+                    }
                 }
             }
             Action::ResetCanvas => {
@@ -309,8 +313,8 @@ impl CanvasWM {
         &mut self,
         event: impl PointerMotionAbsoluteEvent<I>,
     ) {
-        let output = self.space.outputs().next().unwrap();
-        let output_geo = self.space.output_geometry(output).unwrap();
+        let Some(output) = self.space.outputs().next() else { return };
+        let Some(output_geo) = self.space.output_geometry(output) else { return };
 
         // Screen-space position
         let screen_pos = event.position_transformed(output_geo.size) + output_geo.loc.to_f64();
@@ -327,7 +331,7 @@ impl CanvasWM {
         }
 
         let serial = SERIAL_COUNTER.next_serial();
-        let pointer = self.seat.get_pointer().unwrap();
+        let Some(pointer) = self.seat.get_pointer() else { return };
 
         // Convert screen position to canvas position for focus
         let (cx, cy) = self.viewport.screen_to_canvas(screen_pos.x, screen_pos.y);
@@ -352,7 +356,7 @@ impl CanvasWM {
         let button = event.button_code();
         let button_state = event.state();
 
-        let keyboard = self.seat.get_keyboard().unwrap();
+        let Some(keyboard) = self.seat.get_keyboard() else { return };
         let modifiers = keyboard.modifier_state();
 
         // Super+LMB = pan viewport
@@ -367,7 +371,7 @@ impl CanvasWM {
             return;
         }
 
-        let pointer = self.seat.get_pointer().unwrap();
+        let Some(pointer) = self.seat.get_pointer() else { return };
 
         // Alt+LMB = move window, Alt+RMB = resize window
         if button_state == ButtonState::Pressed && modifiers.alt && !pointer.is_grabbed() {
@@ -379,7 +383,7 @@ impl CanvasWM {
                 .element_under(canvas_pos)
                 .map(|(w, l)| (w.clone(), l))
             {
-                let initial_window_location = self.space.element_location(&window).unwrap();
+                let Some(initial_window_location) = self.space.element_location(&window) else { return };
 
                 let start_data = GrabStartData {
                     focus: self
@@ -395,11 +399,13 @@ impl CanvasWM {
                         window: window.clone(),
                         initial_window_location,
                     };
-                    keyboard.set_focus(
-                        self,
-                        Some(window.toplevel().unwrap().wl_surface().clone()),
-                        serial,
-                    );
+                    if let Some(toplevel) = window.toplevel() {
+                        keyboard.set_focus(
+                            self,
+                            Some(toplevel.wl_surface().clone()),
+                            serial,
+                        );
+                    }
                     pointer.set_grab(self, grab, serial, Focus::Clear);
                 } else if button == BTN_RIGHT {
                     use crate::grabs::resize_grab::ResizeEdge;
@@ -414,11 +420,13 @@ impl CanvasWM {
                         edges,
                         Rectangle::new(initial_window_location, initial_window_size),
                     );
-                    keyboard.set_focus(
-                        self,
-                        Some(window.toplevel().unwrap().wl_surface().clone()),
-                        serial,
-                    );
+                    if let Some(toplevel) = window.toplevel() {
+                        keyboard.set_focus(
+                            self,
+                            Some(toplevel.wl_surface().clone()),
+                            serial,
+                        );
+                    }
                     pointer.set_grab(self, grab, serial, Focus::Clear);
                 }
                 return;
@@ -436,19 +444,25 @@ impl CanvasWM {
                 .map(|(w, l)| (w.clone(), l))
             {
                 self.space.raise_element(&window, true);
-                keyboard.set_focus(
-                    self,
-                    Some(window.toplevel().unwrap().wl_surface().clone()),
-                    serial,
-                );
+                if let Some(toplevel) = window.toplevel() {
+                    keyboard.set_focus(
+                        self,
+                        Some(toplevel.wl_surface().clone()),
+                        serial,
+                    );
+                }
                 self.update_focus_history(&window);
                 self.space.elements().for_each(|window| {
-                    window.toplevel().unwrap().send_pending_configure();
+                    if let Some(toplevel) = window.toplevel() {
+                        toplevel.send_pending_configure();
+                    }
                 });
             } else {
                 self.space.elements().for_each(|window| {
                     window.set_activated(false);
-                    window.toplevel().unwrap().send_pending_configure();
+                    if let Some(toplevel) = window.toplevel() {
+                        toplevel.send_pending_configure();
+                    }
                 });
                 keyboard.set_focus(self, Option::<WlSurface>::None, serial);
             }
@@ -476,7 +490,7 @@ impl CanvasWM {
             .amount(Axis::Vertical)
             .unwrap_or_else(|| event.amount_v120(Axis::Vertical).unwrap_or(0.0) * 15.0 / 120.);
 
-        let keyboard = self.seat.get_keyboard().unwrap();
+        let Some(keyboard) = self.seat.get_keyboard() else { return };
         let modifiers = keyboard.modifier_state();
 
         if modifiers.logo {
@@ -538,7 +552,7 @@ impl CanvasWM {
             }
         }
 
-        let pointer = self.seat.get_pointer().unwrap();
+        let Some(pointer) = self.seat.get_pointer() else { return };
         pointer.axis(self, frame);
         pointer.frame(self);
     }

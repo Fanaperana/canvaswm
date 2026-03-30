@@ -79,6 +79,7 @@ pub fn closest_point_on_rect(
 }
 
 /// Fraction of a rectangle's area visible in the current viewport (0.0–1.0).
+#[allow(clippy::too_many_arguments)]
 pub fn visible_fraction(
     rect_x: f64,
     rect_y: f64,

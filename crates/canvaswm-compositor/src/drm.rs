@@ -15,7 +15,6 @@ use smithay::{
         allocator::gbm::GbmDevice,
         drm::{DrmDevice, DrmDeviceFd, DrmNode, NodeType},
         egl::EGLDisplay,
-        input::InputEvent,
         libinput::{LibinputInputBackend, LibinputSessionInterface},
         renderer::{
             damage::OutputDamageTracker,
@@ -25,7 +24,7 @@ use smithay::{
         session::{Event as SessionEvent, Session},
         udev::{self, UdevBackend, UdevEvent},
     },
-    output::{Mode, Output, PhysicalProperties, Subpixel},
+    output::Output,
     reexports::{
         calloop::{
             timer::{TimeoutAction, Timer},
@@ -33,7 +32,6 @@ use smithay::{
         },
         input::Libinput,
     },
-    utils::Transform,
 };
 
 use crate::CanvasWM;
@@ -60,6 +58,7 @@ struct OutputSurface {
 pub struct DrmBackendData {
     #[allow(dead_code)]
     pub session: LibSeatSession,
+    #[allow(dead_code)]
     pub primary_gpu: DrmNode,
 }
 
@@ -92,13 +91,13 @@ pub fn init_drm(
         .map_err(|e| format!("Failed to register session notifier: {e}"))?;
 
     // Discover primary GPU via udev
-    let primary_gpu = udev::primary_gpu(&session.seat())
+    let primary_gpu = udev::primary_gpu(session.seat())
         .ok()
         .flatten()
         .and_then(|path| DrmNode::from_path(&path).ok())
         .and_then(|node| node.node_with_type(NodeType::Render).and_then(Result::ok))
         .unwrap_or_else(|| {
-            udev::all_gpus(&session.seat())
+            udev::all_gpus(session.seat())
                 .ok()
                 .and_then(|gpus| gpus.into_iter().next())
                 .and_then(|path| DrmNode::from_path(&path).ok())
@@ -124,7 +123,7 @@ pub fn init_drm(
         .map_err(|e| format!("Failed to register libinput: {e}"))?;
 
     // Initialize udev backend for GPU hotplug
-    let udev_backend = UdevBackend::new(&session.seat())?;
+    let udev_backend = UdevBackend::new(session.seat())?;
 
     // Log already-connected GPUs
     for (device_id, path) in udev_backend.device_list() {

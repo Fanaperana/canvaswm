@@ -6,6 +6,7 @@ use std::path::PathBuf;
 /// Supports loading from TOML, JSON, or YAML.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct Config {
     /// Input settings (keyboard, mouse, trackpad).
     pub input: InputConfig,
@@ -42,6 +43,7 @@ pub struct Config {
 /// Keyboard layout and repeat settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct InputConfig {
     pub keyboard: KeyboardConfig,
     pub trackpad: TrackpadConfig,
@@ -195,6 +197,7 @@ pub struct OutputConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct WindowRule {
     /// Match by app_id (glob pattern).
     pub app_id: Option<String>,
@@ -218,36 +221,7 @@ pub struct WindowRule {
 
 // ── Defaults ──
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            input: InputConfig::default(),
-            navigation: NavigationConfig::default(),
-            zoom: ZoomConfig::default(),
-            scroll: ScrollConfig::default(),
-            effects: EffectsConfig::default(),
-            background: BackgroundConfig::default(),
-            decorations: DecorationConfig::default(),
-            cursor: CursorConfig::default(),
-            snap: SnapConfig::default(),
-            edge_pan: EdgePanConfig::default(),
-            output: OutputConfig::default(),
-            keybindings: HashMap::new(),
-            autostart: Vec::new(),
-            env: HashMap::new(),
-            window_rules: Vec::new(),
-        }
-    }
-}
 
-impl Default for InputConfig {
-    fn default() -> Self {
-        Self {
-            keyboard: KeyboardConfig::default(),
-            trackpad: TrackpadConfig::default(),
-        }
-    }
-}
 
 impl Default for KeyboardConfig {
     fn default() -> Self {
@@ -379,21 +353,6 @@ impl Default for OutputConfig {
     }
 }
 
-impl Default for WindowRule {
-    fn default() -> Self {
-        Self {
-            app_id: None,
-            title: None,
-            decoration: None,
-            pinned: None,
-            widget: None,
-            position: None,
-            size: None,
-            opacity: None,
-            blur: None,
-        }
-    }
-}
 
 // ── Loading ──
 

@@ -83,11 +83,10 @@ pub fn compute_snap(
 /// Check if a leading edge (left/top) should snap.
 fn check_snap(edge: f64, target: f64, threshold: f64, best: &mut Option<(f64, f64)>) {
     let dist = (edge - target).abs();
-    if dist < threshold {
-        if best.is_none() || dist < best.unwrap().1 {
+    if dist < threshold
+        && (best.is_none() || dist < best.unwrap().1) {
             *best = Some((target, dist));
         }
-    }
 }
 
 /// Check if a trailing edge (right/bottom) should snap. Returns position for leading edge.

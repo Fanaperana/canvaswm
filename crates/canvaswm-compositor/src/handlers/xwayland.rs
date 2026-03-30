@@ -53,7 +53,7 @@ impl XwmHandler for CanvasWM {
         let y = y.unwrap_or(geo.loc.y);
         let w = w.unwrap_or(geo.size.w as u32);
         let h = h.unwrap_or(geo.size.h as u32);
-        let _ = window.configure(Rectangle::from_loc_and_size((x, y), (w as i32, h as i32)));
+        let _ = window.configure(Rectangle::new((x, y).into(), (w as i32, h as i32).into()));
     }
 
     fn configure_notify(

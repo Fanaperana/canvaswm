@@ -118,7 +118,12 @@ pub fn compile_background_shader(
 }
 
 /// Build the uniform values for a given frame.
-pub fn build_uniforms(time: f32, camera: (f32, f32), zoom: f32, resolution: (f32, f32)) -> Vec<Uniform<'static>> {
+pub fn build_uniforms(
+    time: f32,
+    camera: (f32, f32),
+    zoom: f32,
+    resolution: (f32, f32),
+) -> Vec<Uniform<'static>> {
     vec![
         Uniform::new("u_time", time),
         Uniform::new("u_camera", [camera.0, camera.1]),

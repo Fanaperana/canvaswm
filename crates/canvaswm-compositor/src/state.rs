@@ -1,4 +1,4 @@
-use std::{ffi::OsString, sync::Arc, time::Instant};
+use std::{ffi::OsString, os::unix::net::UnixListener, sync::Arc, time::Instant};
 
 use smithay::{
     desktop::{PopupManager, Space, Window, WindowSurfaceType},
@@ -16,7 +16,10 @@ use smithay::{
         compositor::{CompositorClientState, CompositorState},
         output::OutputManagerState,
         selection::data_device::DataDeviceState,
-        shell::xdg::XdgShellState,
+        shell::{
+            wlr_layer::WlrLayerShellState,
+            xdg::{decoration::XdgDecorationState, XdgShellState},
+        },
         shm::ShmState,
         socket::ListeningSocketSource,
     },
@@ -68,9 +71,19 @@ pub struct CanvasWM {
     /// Last time state file was written.
     pub state_file_last_write: Instant,
 
+    // -- IPC --
+    /// Unix domain socket for external tool communication.
+    pub ipc_listener: Option<UnixListener>,
+
+    // -- XWayland --
+    /// XWayland window manager instance.
+    pub xwm: Option<smithay::xwayland::X11Wm>,
+
     // Smithay protocol state
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
+    pub xdg_decoration_state: XdgDecorationState,
+    pub layer_shell_state: WlrLayerShellState,
     pub shm_state: ShmState,
     pub output_manager_state: OutputManagerState,
     pub seat_state: SeatState<CanvasWM>,
@@ -97,6 +110,8 @@ impl CanvasWM {
 
         let compositor_state = CompositorState::new::<Self>(&dh);
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
+        let xdg_decoration_state = XdgDecorationState::new::<Self>(&dh);
+        let layer_shell_state = WlrLayerShellState::new::<Self>(&dh);
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
         let popups = PopupManager::default();
         let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(&dh);
@@ -115,6 +130,9 @@ impl CanvasWM {
         let space = Space::default();
         let socket_name = Self::init_wayland_listener(display, event_loop);
         let loop_signal = event_loop.get_signal();
+
+        // Create IPC listener
+        let ipc_listener = crate::ipc::create_listener();
 
         // Apply config to viewport
         let mut viewport = Viewport::default();
@@ -138,8 +156,12 @@ impl CanvasWM {
             edge_pan_velocity: None,
             fullscreen: None,
             state_file_last_write: start_time,
+            ipc_listener,
+            xwm: None,
             compositor_state,
             xdg_shell_state,
+            xdg_decoration_state,
+            layer_shell_state,
             shm_state,
             output_manager_state,
             seat_state,

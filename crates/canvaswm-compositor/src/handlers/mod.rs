@@ -1,5 +1,8 @@
 pub mod compositor;
+pub mod layer_shell;
+pub mod xdg_decoration;
 pub mod xdg_shell;
+pub mod xwayland;
 
 use crate::CanvasWM;
 

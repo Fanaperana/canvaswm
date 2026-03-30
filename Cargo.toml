@@ -15,9 +15,16 @@ edition = "2021"
 [workspace.dependencies]
 smithay = { version = "0.7", default-features = false, features = [
     "backend_winit",
+    "backend_drm",
+    "backend_gbm",
+    "backend_egl",
+    "backend_udev",
+    "backend_libinput",
+    "backend_session_libseat",
     "wayland_frontend",
     "desktop",
     "renderer_glow",
+    "xwayland",
 ] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

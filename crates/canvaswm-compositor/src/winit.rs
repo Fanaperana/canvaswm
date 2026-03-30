@@ -5,10 +5,8 @@ use smithay::{
         renderer::{
             damage::OutputDamageTracker,
             element::{
-                solid::SolidColorRenderElement,
-                surface::WaylandSurfaceRenderElement,
-                utils::RescaleRenderElement,
-                Element, Id, Kind, RenderElement, UnderlyingStorage,
+                solid::SolidColorRenderElement, surface::WaylandSurfaceRenderElement,
+                utils::RescaleRenderElement, Element, Id, Kind, RenderElement, UnderlyingStorage,
             },
             gles::{
                 element::PixelShaderElement, GlesError, GlesFrame, GlesPixelProgram, GlesRenderer,
@@ -19,8 +17,10 @@ use smithay::{
     },
     output::{Mode, Output, PhysicalProperties, Subpixel},
     reexports::calloop::EventLoop,
-    utils::{Buffer, Physical, Point, Rectangle, Scale, Transform},
+    utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform},
 };
+
+use canvaswm_render::decorations::DecorationShaders;
 
 use crate::CanvasWM;
 
@@ -133,12 +133,8 @@ impl RenderElement<GlesRenderer> for CanvasRenderElement {
     fn underlying_storage(&self, renderer: &mut GlesRenderer) -> Option<UnderlyingStorage<'_>> {
         match self {
             Self::Rescaled(e) => e.underlying_storage(renderer),
-            Self::DotGrid(e) => {
-                RenderElement::<GlesRenderer>::underlying_storage(e, renderer)
-            }
-            Self::Shader(e) => {
-                RenderElement::<GlesRenderer>::underlying_storage(e, renderer)
-            }
+            Self::DotGrid(e) => RenderElement::<GlesRenderer>::underlying_storage(e, renderer),
+            Self::Shader(e) => RenderElement::<GlesRenderer>::underlying_storage(e, renderer),
         }
     }
 }
@@ -214,6 +210,21 @@ pub fn init_winit(
         None
     };
 
+    // Compile decoration shaders (shadow, border, title bar)
+    let deco_shaders: Option<DecorationShaders> = {
+        let (renderer, _) = backend.bind().unwrap();
+        match DecorationShaders::compile(renderer) {
+            Ok(shaders) => {
+                tracing::info!("Decoration shaders compiled");
+                Some(shaders)
+            }
+            Err(e) => {
+                tracing::error!("Decoration shader error: {e}");
+                None
+            }
+        }
+    };
+
     let mut damage_tracker = OutputDamageTracker::from_output(&output);
     let mut last_frame = std::time::Instant::now();
 
@@ -241,10 +252,14 @@ pub fn init_winit(
                     last_frame = now;
 
                     // Advance viewport animations (camera lerp, zoom lerp)
-                    state.viewport.tick_animations(Duration::from_secs_f64(dt_secs));
+                    state
+                        .viewport
+                        .tick_animations(Duration::from_secs_f64(dt_secs));
 
                     // Advance scroll momentum
-                    if let Some((dx, dy)) = state.pan_momentum.tick(Duration::from_secs_f64(dt_secs)) {
+                    if let Some((dx, dy)) =
+                        state.pan_momentum.tick(Duration::from_secs_f64(dt_secs))
+                    {
                         state.viewport.pan(dx, dy);
                     }
 
@@ -254,13 +269,20 @@ pub fn init_winit(
                     // Write state file for external tools
                     state.write_state_file();
 
+                    // Poll IPC socket for commands
+                    if let Some(listener) = state.ipc_listener.take() {
+                        crate::ipc::poll_and_handle(&listener, state);
+                        state.ipc_listener = Some(listener);
+                    }
+
                     let size = backend.window_size();
                     let damage = Rectangle::from_size(size);
                     let viewport = &state.viewport;
                     let zoom = viewport.zoom;
 
                     // Background elements: either shader or dot grid
-                    let bg_elements: Vec<CanvasRenderElement> = if let Some(ref shader) = bg_shader {
+                    let bg_elements: Vec<CanvasRenderElement> = if let Some(ref shader) = bg_shader
+                    {
                         // Shader background — full screen quad with viewport uniforms
                         let elapsed = state.start_time.elapsed().as_secs_f32();
                         let uniforms = canvaswm_render::shader_bg::build_uniforms(
@@ -269,17 +291,23 @@ pub fn init_winit(
                             zoom as f32,
                             (size.w as f32, size.h as f32),
                         );
-                        let area = smithay::utils::Rectangle::from_size(
-                            smithay::utils::Size::<i32, smithay::utils::Logical>::from((size.w, size.h)),
-                        );
-                        let element = smithay::backend::renderer::gles::element::PixelShaderElement::new(
-                            shader.clone(),
-                            area,
-                            None,
-                            1.0,
-                            uniforms,
-                            smithay::backend::renderer::element::Kind::Unspecified,
-                        );
+                        let area = smithay::utils::Rectangle::from_size(smithay::utils::Size::<
+                            i32,
+                            smithay::utils::Logical,
+                        >::from(
+                            (
+                            size.w, size.h,
+                        )
+                        ));
+                        let element =
+                            smithay::backend::renderer::gles::element::PixelShaderElement::new(
+                                shader.clone(),
+                                area,
+                                None,
+                                1.0,
+                                uniforms,
+                                smithay::backend::renderer::element::Kind::Unspecified,
+                            );
                         vec![CanvasRenderElement::Shader(element)]
                     } else {
                         // Dot grid background
@@ -311,27 +339,38 @@ pub fn init_winit(
                             Rectangle::new((cam_x, cam_y).into(), (vis_w, vis_h).into());
 
                         let raw_space_elements: Vec<WaylandSurfaceRenderElement<GlesRenderer>> =
-                            state
-                                .space
-                                .render_elements_for_region(renderer, &visible_region, 1.0, 1.0);
+                            state.space.render_elements_for_region(
+                                renderer,
+                                &visible_region,
+                                1.0,
+                                1.0,
+                            );
 
                         // Apply zoom via RescaleRenderElement
                         let zoom_scale: Scale<f64> = Scale::from((zoom, zoom));
                         let origin = Point::<i32, Physical>::from((0, 0));
-                        let space_elements: Vec<CanvasRenderElement> =
-                            raw_space_elements
-                                .into_iter()
-                                .map(|e| {
-                                    CanvasRenderElement::from(
-                                        RescaleRenderElement::from_element(e, origin, zoom_scale),
-                                    )
-                                })
-                                .collect();
+                        let space_elements: Vec<CanvasRenderElement> = raw_space_elements
+                            .into_iter()
+                            .map(|e| {
+                                CanvasRenderElement::from(RescaleRenderElement::from_element(
+                                    e, origin, zoom_scale,
+                                ))
+                            })
+                            .collect();
 
-                        // Compose: windows first (on top), then background (behind)
-                        let mut all_elements: Vec<CanvasRenderElement> =
-                            Vec::with_capacity(space_elements.len() + bg_elements.len());
+                        // Generate decoration elements (shadows, borders, title bars)
+                        let deco_elements = generate_decoration_elements(
+                            state,
+                            &deco_shaders,
+                            zoom,
+                        );
+
+                        // Compose: decorations behind windows, windows on top, bg at back
+                        let mut all_elements: Vec<CanvasRenderElement> = Vec::with_capacity(
+                            space_elements.len() + deco_elements.len() + bg_elements.len(),
+                        );
                         all_elements.extend(space_elements);
+                        all_elements.extend(deco_elements);
                         all_elements.extend(bg_elements);
 
                         // Background color from config
@@ -360,6 +399,7 @@ pub fn init_winit(
                     backend.window().request_redraw();
                 }
                 WinitEvent::CloseRequested => {
+                    crate::ipc::cleanup();
                     state.loop_signal.stop();
                 }
                 _ => (),
@@ -367,4 +407,129 @@ pub fn init_winit(
         })?;
 
     Ok(())
+}
+
+/// Generate decoration elements (shadows, borders, title bars) for all visible windows.
+fn generate_decoration_elements(
+    state: &CanvasWM,
+    deco_shaders: &Option<DecorationShaders>,
+    zoom: f64,
+) -> Vec<CanvasRenderElement> {
+    let deco_shaders = match deco_shaders {
+        Some(s) => s,
+        None => return Vec::new(),
+    };
+
+    let config = &state.config;
+    let shadow_enabled = config.effects.shadows;
+    let shadow_radius = config.effects.shadow_radius as f32;
+    let corner_radius = if config.effects.corner_rounding {
+        config.effects.corner_radius as f32
+    } else {
+        0.0
+    };
+    let border_width = config.decorations.border_width as f32;
+    let ssd_mode = config.decorations.mode == "server";
+    let title_height = config.decorations.title_bar_height;
+
+    let focused_window = state.focus_history.first();
+    let mut elements = Vec::new();
+
+    for window in state.space.elements() {
+        let Some(loc) = state.space.element_location(window) else {
+            continue;
+        };
+        let geo = window.geometry();
+        let win_w = geo.size.w as f32;
+        let win_h = geo.size.h as f32;
+
+        let is_focused = focused_window.map_or(false, |f| f == window);
+        let border_color = if is_focused {
+            config.decorations.focused_color
+        } else {
+            config.decorations.unfocused_color
+        };
+
+        // Convert canvas-space window position to screen-space for element placement
+        let (screen_x, screen_y) = state.viewport.canvas_to_screen(loc.x as f64, loc.y as f64);
+        let screen_w = (win_w as f64 * zoom) as i32;
+        let screen_h = (win_h as f64 * zoom) as i32;
+        let scaled_radius = corner_radius * zoom as f32;
+        let scaled_border = border_width * zoom as f32;
+        let scaled_shadow_radius = shadow_radius * zoom as f32;
+
+        // Shadow element (rendered behind the window)
+        if shadow_enabled && shadow_radius > 0.0 {
+            let spread = scaled_shadow_radius;
+            let shadow_x = screen_x as i32 - spread as i32;
+            let shadow_y = screen_y as i32 - spread as i32;
+            let shadow_w = screen_w + spread as i32 * 2;
+            let shadow_h = screen_h + spread as i32 * 2;
+
+            let area = Rectangle::new(
+                Point::<i32, Logical>::from((shadow_x, shadow_y)),
+                Size::<i32, Logical>::from((shadow_w, shadow_h)),
+            );
+            let uniforms = DecorationShaders::shadow_uniforms(
+                [0.0, 0.0, 0.0, 0.6],
+                scaled_radius,
+                (screen_w as f32, screen_h as f32),
+                spread,
+            );
+            elements.push(CanvasRenderElement::Shader(PixelShaderElement::new(
+                deco_shaders.shadow.clone(),
+                area,
+                None,
+                1.0,
+                uniforms,
+                Kind::Unspecified,
+            )));
+        }
+
+        // Border element (around the window)
+        if border_width > 0.0 {
+            let bw = scaled_border.ceil() as i32;
+            let area = Rectangle::new(
+                Point::<i32, Logical>::from((screen_x as i32 - bw, screen_y as i32 - bw)),
+                Size::<i32, Logical>::from((screen_w + bw * 2, screen_h + bw * 2)),
+            );
+            let uniforms = DecorationShaders::border_uniforms(
+                border_color,
+                scaled_radius + scaled_border,
+                scaled_border,
+                ((screen_w + bw * 2) as f32, (screen_h + bw * 2) as f32),
+            );
+            elements.push(CanvasRenderElement::Shader(PixelShaderElement::new(
+                deco_shaders.border.clone(),
+                area,
+                None,
+                1.0,
+                uniforms,
+                Kind::Unspecified,
+            )));
+        }
+
+        // SSD title bar element (above the window)
+        if ssd_mode {
+            let scaled_title_h = (title_height as f64 * zoom) as i32;
+            let area = Rectangle::new(
+                Point::<i32, Logical>::from((screen_x as i32, screen_y as i32 - scaled_title_h)),
+                Size::<i32, Logical>::from((screen_w, scaled_title_h)),
+            );
+            let uniforms = DecorationShaders::title_bar_uniforms(
+                config.decorations.title_bar_color,
+                scaled_radius / screen_w.max(1) as f32, // normalized radius
+            );
+            elements.push(CanvasRenderElement::Shader(PixelShaderElement::new(
+                deco_shaders.title_bar.clone(),
+                area,
+                None,
+                1.0,
+                uniforms,
+                Kind::Unspecified,
+            )));
+        }
+    }
+
+    elements
 }

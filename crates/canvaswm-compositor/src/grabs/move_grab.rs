@@ -29,7 +29,33 @@ impl PointerGrab<CanvasWM> for MoveSurfaceGrab {
         handle.motion(data, None, event);
 
         let delta = event.location - self.start_data.location;
-        let new_location = self.initial_window_location.to_f64() + delta;
+        let mut new_location = self.initial_window_location.to_f64() + delta;
+
+        // Apply snapping if enabled
+        if data.config.snap.enabled {
+            let geo = self.window.geometry();
+            let moving_rect = (new_location.x, new_location.y, geo.size.w as f64, geo.size.h as f64);
+            let others = data.space.elements()
+                .filter(|w| *w != &self.window)
+                .filter_map(|w| {
+                    let loc = data.space.element_location(w)?;
+                    let size = w.geometry().size;
+                    Some((loc.x as f64, loc.y as f64, size.w as f64, size.h as f64))
+                });
+            let (snap_x, snap_y) = canvaswm_canvas::compute_snap(
+                moving_rect,
+                others,
+                data.config.snap.gap,
+                data.config.snap.distance,
+            );
+            if let Some(sx) = snap_x {
+                new_location.x = sx;
+            }
+            if let Some(sy) = snap_y {
+                new_location.y = sy;
+            }
+        }
+
         data.space
             .map_element(self.window.clone(), new_location.to_i32_round(), true);
     }

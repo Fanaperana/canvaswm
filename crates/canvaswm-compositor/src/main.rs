@@ -1,8 +1,10 @@
 #![allow(irrefutable_let_patterns)]
 
+mod drm;
 mod grabs;
 mod handlers;
 mod input;
+mod ipc;
 mod state;
 mod winit;
 
@@ -31,8 +33,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let display: Display<CanvasWM> = Display::new()?;
     let mut state = CanvasWM::new(&mut event_loop, display);
 
-    // Initialize the winit backend (opens a window on your current desktop)
-    crate::winit::init_winit(&mut event_loop, &mut state)?;
+    // Select backend: --backend=drm for native, default is winit
+    let use_drm = args.iter().any(|a| a == "--backend=drm" || a == "--drm");
+
+    if use_drm {
+        let _drm_data = crate::drm::init_drm(&mut event_loop, &mut state)?;
+        tracing::info!("DRM/KMS backend initialized");
+    } else {
+        crate::winit::init_winit(&mut event_loop, &mut state)?;
+    }
 
     // Set WAYLAND_DISPLAY so child processes connect to us
     std::env::set_var("WAYLAND_DISPLAY", &state.socket_name);

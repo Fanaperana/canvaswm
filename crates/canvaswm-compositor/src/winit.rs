@@ -462,10 +462,40 @@ pub fn init_winit(
                             .map(CanvasRenderElement::from)
                             .collect();
 
-                        // Compose: minimap on top, corner clips above windows, windows, decorations behind, bg at back
+                        // Corner clip for the minimap background
+                        let minimap_clip: Vec<CanvasRenderElement> = if let Some(ref shaders) = deco_shaders {
+                            let mm_w = 200i32;
+                            let mm_h = 140i32;
+                            let mm_margin = 16i32;
+                            let mm_x = mm_margin;
+                            let mm_y = size.h - mm_h - mm_margin;
+                            let mm_radius = 6.0f32;
+                            let area = Rectangle::new(
+                                Point::<i32, Logical>::from((mm_x, mm_y)),
+                                Size::<i32, Logical>::from((mm_w, mm_h)),
+                            );
+                            let uniforms = DecorationShaders::corner_clip_uniforms(
+                                mm_radius,
+                                (mm_w as f32, mm_h as f32),
+                                state.config.background.color,
+                            );
+                            vec![CanvasRenderElement::Shader(PixelShaderElement::new(
+                                shaders.corner_clip.clone(),
+                                area,
+                                None,
+                                1.0,
+                                uniforms,
+                                Kind::Unspecified,
+                            ))]
+                        } else {
+                            Vec::new()
+                        };
+
+                        // Compose: minimap clip on top, minimap, corner clips above windows, windows, decorations behind, bg at back
                         let mut all_elements: Vec<CanvasRenderElement> = Vec::with_capacity(
-                            minimap_elems.len() + corner_clip_elements.len() + space_elements.len() + deco_elements.len() + bg_elements.len(),
+                            minimap_clip.len() + minimap_elems.len() + corner_clip_elements.len() + space_elements.len() + deco_elements.len() + bg_elements.len(),
                         );
+                        all_elements.extend(minimap_clip);
                         all_elements.extend(minimap_elems);
                         all_elements.extend(corner_clip_elements);
                         all_elements.extend(space_elements);

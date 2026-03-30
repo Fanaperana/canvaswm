@@ -55,9 +55,9 @@ void main() {
     // Map UV to centered coordinates
     vec2 size = u_window_size + u_spread * 2.0;
     vec2 p = (uv - 0.5) * size;
-    vec2 half_win = u_window_size * 0.5;
+    vec2 halfWin = u_window_size * 0.5;
     
-    float dist = roundedBoxSDF(p, half_win, u_radius);
+    float dist = roundedBoxSDF(p, halfWin, u_radius);
     
     // Shadow falloff — Gaussian-like
     float shadow = 1.0 - smoothstep(0.0, u_spread, dist);
@@ -86,10 +86,10 @@ float roundedBoxSDF(vec2 p, vec2 b, float r) {
 void main() {
     vec2 uv = v_coords;
     vec2 p = (uv - 0.5) * u_size;
-    vec2 half = u_size * 0.5;
+    vec2 halfSize = u_size * 0.5;
     
-    float outer = roundedBoxSDF(p, half, u_radius);
-    float inner = roundedBoxSDF(p, half - vec2(u_border_width), max(u_radius - u_border_width, 0.0));
+    float outer = roundedBoxSDF(p, halfSize, u_radius);
+    float inner = roundedBoxSDF(p, halfSize - vec2(u_border_width), max(u_radius - u_border_width, 0.0));
     
     // Border region: outside inner, inside outer
     float border = smoothstep(0.5, -0.5, outer) * smoothstep(-0.5, 0.5, inner);

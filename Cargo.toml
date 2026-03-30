@@ -1,0 +1,35 @@
+[workspace]
+members = [
+    "crates/canvaswm-canvas",
+    "crates/canvaswm-render",
+    "crates/canvaswm-input",
+    "crates/canvaswm-config",
+    "crates/canvaswm-compositor",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+[workspace.dependencies]
+smithay = { version = "0.7", default-features = false, features = [
+    "backend_winit",
+    "wayland_frontend",
+    "desktop",
+    "renderer_glow",
+] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+bitflags = "2.11.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml_crate = { package = "toml", version = "0.8" }
+serde_yaml = "0.9"
+dirs = "6"
+
+# Internal crates
+canvaswm-canvas = { path = "crates/canvaswm-canvas" }
+canvaswm-render = { path = "crates/canvaswm-render" }
+canvaswm-input = { path = "crates/canvaswm-input" }
+canvaswm-config = { path = "crates/canvaswm-config" }

@@ -1,0 +1,7 @@
+[package]
+name = "canvaswm-canvas"
+description = "Infinite canvas viewport math: coordinate transforms, zoom, momentum physics"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]

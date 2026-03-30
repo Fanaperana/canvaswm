@@ -1,0 +1,9 @@
+[package]
+name = "canvaswm-render"
+description = "Rendering helpers: dot grid background, viewport-aware drawing"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+canvaswm-canvas = { workspace = true }
+smithay = { workspace = true }

@@ -1,0 +1,19 @@
+[package]
+name = "canvaswm-compositor"
+description = "CanvasWM compositor — the main binary"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "canvaswm"
+path = "src/main.rs"
+
+[dependencies]
+canvaswm-canvas = { workspace = true }
+canvaswm-render = { workspace = true }
+canvaswm-input = { workspace = true }
+canvaswm-config = { workspace = true }
+smithay = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+bitflags = { workspace = true }

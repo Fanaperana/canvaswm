@@ -1,0 +1,7 @@
+[package]
+name = "canvaswm-input"
+description = "Input handling: keybindings, actions, pan/zoom gesture definitions"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]

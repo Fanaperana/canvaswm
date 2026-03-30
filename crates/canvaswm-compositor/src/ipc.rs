@@ -69,7 +69,11 @@ impl IpcResponse {
         }
     }
     fn ok() -> Self {
-        Self { ok: true, error: None, data: None }
+        Self {
+            ok: true,
+            error: None,
+            data: None,
+        }
     }
 }
 

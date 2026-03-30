@@ -2,9 +2,8 @@ use std::time::Instant;
 
 use smithay::{
     backend::input::{
-        Axis, AxisSource, ButtonState, Event, InputBackend,
-        InputEvent, KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
-        PointerMotionAbsoluteEvent,
+        Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent, KeyState, KeyboardKeyEvent,
+        PointerAxisEvent, PointerButtonEvent, PointerMotionAbsoluteEvent,
     },
     input::{
         keyboard::{keysyms, FilterResult},
@@ -50,7 +49,9 @@ impl CanvasWM {
         let key_code = event.key_code();
         let state = event.state();
 
-        let Some(keyboard) = self.seat.get_keyboard() else { return };
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return;
+        };
 
         let action = keyboard.input::<Action, _>(
             self,
@@ -72,33 +73,73 @@ impl CanvasWM {
 
                     if modifiers.logo {
                         match sym {
-                            keysyms::KEY_Return => return FilterResult::Intercept(Action::SpawnTerminal),
-                            keysyms::KEY_d => return FilterResult::Intercept(Action::SpawnLauncher),
+                            keysyms::KEY_Return => {
+                                return FilterResult::Intercept(Action::SpawnTerminal)
+                            }
+                            keysyms::KEY_d => {
+                                return FilterResult::Intercept(Action::SpawnLauncher)
+                            }
                             keysyms::KEY_q => return FilterResult::Intercept(Action::CloseWindow),
                             keysyms::KEY_0 => return FilterResult::Intercept(Action::ResetCanvas),
                             keysyms::KEY_equal => return FilterResult::Intercept(Action::ZoomIn),
                             keysyms::KEY_minus => return FilterResult::Intercept(Action::ZoomOut),
                             keysyms::KEY_w => return FilterResult::Intercept(Action::ZoomToFit),
                             keysyms::KEY_c => return FilterResult::Intercept(Action::CenterWindow),
-                            keysyms::KEY_f => return FilterResult::Intercept(Action::ToggleFullscreen),
-                            keysyms::KEY_Home => return FilterResult::Intercept(Action::HomeToggle),
+                            keysyms::KEY_f => {
+                                return FilterResult::Intercept(Action::ToggleFullscreen)
+                            }
+                            keysyms::KEY_Home => {
+                                return FilterResult::Intercept(Action::HomeToggle)
+                            }
                             keysyms::KEY_r => return FilterResult::Intercept(Action::ReloadConfig),
                             keysyms::KEY_Escape => return FilterResult::Intercept(Action::Quit),
                             // Directional navigation: Super+Arrow
-                            keysyms::KEY_Left => return FilterResult::Intercept(Action::NavigateDirection(Direction::Left)),
-                            keysyms::KEY_Right => return FilterResult::Intercept(Action::NavigateDirection(Direction::Right)),
-                            keysyms::KEY_Up => return FilterResult::Intercept(Action::NavigateDirection(Direction::Up)),
-                            keysyms::KEY_Down => return FilterResult::Intercept(Action::NavigateDirection(Direction::Down)),
+                            keysyms::KEY_Left => {
+                                return FilterResult::Intercept(Action::NavigateDirection(
+                                    Direction::Left,
+                                ))
+                            }
+                            keysyms::KEY_Right => {
+                                return FilterResult::Intercept(Action::NavigateDirection(
+                                    Direction::Right,
+                                ))
+                            }
+                            keysyms::KEY_Up => {
+                                return FilterResult::Intercept(Action::NavigateDirection(
+                                    Direction::Up,
+                                ))
+                            }
+                            keysyms::KEY_Down => {
+                                return FilterResult::Intercept(Action::NavigateDirection(
+                                    Direction::Down,
+                                ))
+                            }
                             _ => {}
                         }
 
                         // Super+Shift+Arrow = nudge window
                         if modifiers.shift {
                             match sym {
-                                keysyms::KEY_Left => return FilterResult::Intercept(Action::NudgeWindow(Direction::Left)),
-                                keysyms::KEY_Right => return FilterResult::Intercept(Action::NudgeWindow(Direction::Right)),
-                                keysyms::KEY_Up => return FilterResult::Intercept(Action::NudgeWindow(Direction::Up)),
-                                keysyms::KEY_Down => return FilterResult::Intercept(Action::NudgeWindow(Direction::Down)),
+                                keysyms::KEY_Left => {
+                                    return FilterResult::Intercept(Action::NudgeWindow(
+                                        Direction::Left,
+                                    ))
+                                }
+                                keysyms::KEY_Right => {
+                                    return FilterResult::Intercept(Action::NudgeWindow(
+                                        Direction::Right,
+                                    ))
+                                }
+                                keysyms::KEY_Up => {
+                                    return FilterResult::Intercept(Action::NudgeWindow(
+                                        Direction::Up,
+                                    ))
+                                }
+                                keysyms::KEY_Down => {
+                                    return FilterResult::Intercept(Action::NudgeWindow(
+                                        Direction::Down,
+                                    ))
+                                }
                                 _ => {}
                             }
                         }
@@ -257,7 +298,8 @@ impl CanvasWM {
 
         // If already fullscreen, restore
         if let Some(fs) = self.fullscreen.take() {
-            self.space.map_element(fs.window.clone(), fs.saved_location, false);
+            self.space
+                .map_element(fs.window.clone(), fs.saved_location, false);
             self.viewport.camera_x = fs.saved_camera.0;
             self.viewport.camera_y = fs.saved_camera.1;
             self.viewport.zoom = fs.saved_zoom;
@@ -313,8 +355,12 @@ impl CanvasWM {
         &mut self,
         event: impl PointerMotionAbsoluteEvent<I>,
     ) {
-        let Some(output) = self.space.outputs().next() else { return };
-        let Some(output_geo) = self.space.output_geometry(output) else { return };
+        let Some(output) = self.space.outputs().next() else {
+            return;
+        };
+        let Some(output_geo) = self.space.output_geometry(output) else {
+            return;
+        };
 
         // Screen-space position
         let screen_pos = event.position_transformed(output_geo.size) + output_geo.loc.to_f64();
@@ -331,7 +377,9 @@ impl CanvasWM {
         }
 
         let serial = SERIAL_COUNTER.next_serial();
-        let Some(pointer) = self.seat.get_pointer() else { return };
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
 
         // Convert screen position to canvas position for focus
         let (cx, cy) = self.viewport.screen_to_canvas(screen_pos.x, screen_pos.y);
@@ -356,7 +404,9 @@ impl CanvasWM {
         let button = event.button_code();
         let button_state = event.state();
 
-        let Some(keyboard) = self.seat.get_keyboard() else { return };
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return;
+        };
         let modifiers = keyboard.modifier_state();
 
         // Super+LMB = pan viewport
@@ -371,11 +421,15 @@ impl CanvasWM {
             return;
         }
 
-        let Some(pointer) = self.seat.get_pointer() else { return };
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
 
         // Alt+LMB = move window, Alt+RMB = resize window
         if button_state == ButtonState::Pressed && modifiers.alt && !pointer.is_grabbed() {
-            let (cx, cy) = self.viewport.screen_to_canvas(self.cursor_pos.x, self.cursor_pos.y);
+            let (cx, cy) = self
+                .viewport
+                .screen_to_canvas(self.cursor_pos.x, self.cursor_pos.y);
             let canvas_pos: Point<f64, Logical> = Point::from((cx, cy));
 
             if let Some((window, _loc)) = self
@@ -383,7 +437,9 @@ impl CanvasWM {
                 .element_under(canvas_pos)
                 .map(|(w, l)| (w.clone(), l))
             {
-                let Some(initial_window_location) = self.space.element_location(&window) else { return };
+                let Some(initial_window_location) = self.space.element_location(&window) else {
+                    return;
+                };
 
                 let start_data = GrabStartData {
                     focus: self
@@ -400,11 +456,7 @@ impl CanvasWM {
                         initial_window_location,
                     };
                     if let Some(toplevel) = window.toplevel() {
-                        keyboard.set_focus(
-                            self,
-                            Some(toplevel.wl_surface().clone()),
-                            serial,
-                        );
+                        keyboard.set_focus(self, Some(toplevel.wl_surface().clone()), serial);
                     }
                     pointer.set_grab(self, grab, serial, Focus::Clear);
                 } else if button == BTN_RIGHT {
@@ -421,11 +473,7 @@ impl CanvasWM {
                         Rectangle::new(initial_window_location, initial_window_size),
                     );
                     if let Some(toplevel) = window.toplevel() {
-                        keyboard.set_focus(
-                            self,
-                            Some(toplevel.wl_surface().clone()),
-                            serial,
-                        );
+                        keyboard.set_focus(self, Some(toplevel.wl_surface().clone()), serial);
                     }
                     pointer.set_grab(self, grab, serial, Focus::Clear);
                 }
@@ -435,7 +483,9 @@ impl CanvasWM {
 
         if ButtonState::Pressed == button_state && !pointer.is_grabbed() {
             // Click focus
-            let (cx, cy) = self.viewport.screen_to_canvas(self.cursor_pos.x, self.cursor_pos.y);
+            let (cx, cy) = self
+                .viewport
+                .screen_to_canvas(self.cursor_pos.x, self.cursor_pos.y);
             let canvas_pos: Point<f64, Logical> = Point::from((cx, cy));
 
             if let Some((window, _loc)) = self
@@ -445,11 +495,7 @@ impl CanvasWM {
             {
                 self.space.raise_element(&window, true);
                 if let Some(toplevel) = window.toplevel() {
-                    keyboard.set_focus(
-                        self,
-                        Some(toplevel.wl_surface().clone()),
-                        serial,
-                    );
+                    keyboard.set_focus(self, Some(toplevel.wl_surface().clone()), serial);
                 }
                 self.update_focus_history(&window);
                 self.space.elements().for_each(|window| {
@@ -490,12 +536,18 @@ impl CanvasWM {
             .amount(Axis::Vertical)
             .unwrap_or_else(|| event.amount_v120(Axis::Vertical).unwrap_or(0.0) * 15.0 / 120.);
 
-        let Some(keyboard) = self.seat.get_keyboard() else { return };
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return;
+        };
         let modifiers = keyboard.modifier_state();
 
         if modifiers.logo {
             // Super + scroll = zoom at cursor
-            let factor = if vertical_amount < 0.0 { 1.05 } else { 1.0 / 1.05 };
+            let factor = if vertical_amount < 0.0 {
+                1.05
+            } else {
+                1.0 / 1.05
+            };
             self.viewport
                 .zoom_at(self.cursor_pos.x, self.cursor_pos.y, factor);
             return;
@@ -552,7 +604,9 @@ impl CanvasWM {
             }
         }
 
-        let Some(pointer) = self.seat.get_pointer() else { return };
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
         pointer.axis(self, frame);
         pointer.frame(self);
     }

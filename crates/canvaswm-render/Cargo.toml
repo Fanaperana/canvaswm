@@ -7,3 +7,4 @@ edition.workspace = true
 [dependencies]
 canvaswm-canvas = { workspace = true }
 smithay = { workspace = true }
+dirs = { workspace = true }

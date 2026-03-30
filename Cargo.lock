@@ -220,6 +220,7 @@ name = "canvaswm-render"
 version = "0.1.0"
 dependencies = [
  "canvaswm-canvas",
+ "dirs",
  "smithay",
 ]
 

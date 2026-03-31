@@ -54,6 +54,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::env::set_var("COLORTERM", "truecolor");
     }
 
+    // Force Wayland backend for toolkit apps (prevents them falling back to X11)
+    std::env::set_var("GDK_BACKEND", "wayland");
+    std::env::set_var("QT_QPA_PLATFORM", "wayland");
+    std::env::set_var("SDL_VIDEODRIVER", "wayland");
+    std::env::set_var("MOZ_ENABLE_WAYLAND", "1");
+    // Remove DISPLAY so X11 apps don't try to connect to host X server
+    std::env::remove_var("DISPLAY");
+
     // Set env vars from config (can override the defaults above)
     for (k, v) in &state.config.env {
         std::env::set_var(k, v);

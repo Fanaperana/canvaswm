@@ -59,7 +59,7 @@ pub struct PanelConfig {
 impl Default for PanelConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: false,
             position: "top".into(),
             height: 32,
             background_color: [0.08, 0.08, 0.12, 0.85],

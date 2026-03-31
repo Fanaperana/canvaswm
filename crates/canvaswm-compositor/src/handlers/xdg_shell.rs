@@ -1,6 +1,8 @@
 use smithay::{
     delegate_xdg_shell,
-    desktop::{find_popup_root_surface, get_popup_toplevel_coords, PopupKind, PopupManager, Space, Window},
+    desktop::{
+        find_popup_root_surface, get_popup_toplevel_coords, PopupKind, PopupManager, Space, Window,
+    },
     input::{
         pointer::{Focus, GrabStartData as PointerGrabStartData},
         Seat,
@@ -39,14 +41,18 @@ impl XdgShellHandler for CanvasWM {
         let center_sy = self.viewport.height / 2.0;
         let (cx, cy) = self.viewport.screen_to_canvas(center_sx, center_sy);
 
-        // Collect existing window rects for collision avoidance
+        // Collect existing window rects (use bounding box for CSD-aware collision)
         let existing: Vec<(f64, f64, f64, f64)> = self
             .space
             .elements()
             .filter_map(|w| {
                 let loc = self.space.element_location(w)?;
-                let size = w.geometry().size;
-                Some((loc.x as f64, loc.y as f64, size.w as f64, size.h as f64))
+                let geo = w.geometry();
+                let bbox = w.bbox();
+                // Use the larger of geometry vs bbox to account for CSD frames
+                let ew = (geo.size.w.max(bbox.size.w)) as f64;
+                let eh = (geo.size.h.max(bbox.size.h)) as f64;
+                Some((loc.x as f64, loc.y as f64, ew, eh))
             })
             .collect();
 
@@ -57,7 +63,27 @@ impl XdgShellHandler for CanvasWM {
         };
         let (nx, ny) = canvaswm_canvas::find_free_position(cx, cy, 0.0, 0.0, &existing, gap);
         self.space
-            .map_element(window, (nx as i32, ny as i32), false);
+            .map_element(window.clone(), (nx as i32, ny as i32), false);
+
+        // Focus the new window and smoothly animate the viewport to it
+        let serial = smithay::utils::SERIAL_COUNTER.next_serial();
+        self.space.raise_element(&window, true);
+        if let Some(toplevel) = window.toplevel() {
+            self.seat.get_keyboard().unwrap().set_focus(
+                self,
+                Some(toplevel.wl_surface().clone()),
+                serial,
+            );
+        }
+        self.update_focus_history(&window);
+
+        // Estimate center of the new window for animation (use default size since
+        // the client hasn't committed geometry yet)
+        let est_w = 600.0_f64;
+        let est_h = 400.0_f64;
+        let win_cx = nx + est_w / 2.0;
+        let win_cy = ny + est_h / 2.0;
+        self.viewport.animate_to(win_cx, win_cy);
     }
 
     fn new_popup(&mut self, surface: PopupSurface, _positioner: PositionerState) {
@@ -81,18 +107,26 @@ impl XdgShellHandler for CanvasWM {
     }
 
     fn move_request(&mut self, surface: ToplevelSurface, seat: wl_seat::WlSeat, serial: Serial) {
-        let Some(seat) = Seat::from_resource(&seat) else { return };
+        let Some(seat) = Seat::from_resource(&seat) else {
+            return;
+        };
         let wl_surface = surface.wl_surface();
 
         if let Some(start_data) = check_grab(&seat, wl_surface, serial) {
-            let Some(pointer) = seat.get_pointer() else { return };
+            let Some(pointer) = seat.get_pointer() else {
+                return;
+            };
             let Some(window) = self
                 .space
                 .elements()
                 .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == wl_surface))
                 .cloned()
-            else { return };
-            let Some(initial_window_location) = self.space.element_location(&window) else { return };
+            else {
+                return;
+            };
+            let Some(initial_window_location) = self.space.element_location(&window) else {
+                return;
+            };
 
             let grab = MoveSurfaceGrab {
                 start_data,
@@ -111,18 +145,26 @@ impl XdgShellHandler for CanvasWM {
         serial: Serial,
         edges: xdg_toplevel::ResizeEdge,
     ) {
-        let Some(seat) = Seat::from_resource(&seat) else { return };
+        let Some(seat) = Seat::from_resource(&seat) else {
+            return;
+        };
         let wl_surface = surface.wl_surface();
 
         if let Some(start_data) = check_grab(&seat, wl_surface, serial) {
-            let Some(pointer) = seat.get_pointer() else { return };
+            let Some(pointer) = seat.get_pointer() else {
+                return;
+            };
             let Some(window) = self
                 .space
                 .elements()
                 .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == wl_surface))
                 .cloned()
-            else { return };
-            let Some(initial_window_location) = self.space.element_location(&window) else { return };
+            else {
+                return;
+            };
+            let Some(initial_window_location) = self.space.element_location(&window) else {
+                return;
+            };
             let initial_window_size = window.geometry().size;
 
             surface.with_pending_state(|state| {
@@ -213,9 +255,15 @@ impl CanvasWM {
             return;
         };
 
-        let Some(output) = self.space.outputs().next() else { return };
-        let Some(output_geo) = self.space.output_geometry(output) else { return };
-        let Some(window_geo) = self.space.element_geometry(window) else { return };
+        let Some(output) = self.space.outputs().next() else {
+            return;
+        };
+        let Some(output_geo) = self.space.output_geometry(output) else {
+            return;
+        };
+        let Some(window_geo) = self.space.element_geometry(window) else {
+            return;
+        };
 
         let mut target = output_geo;
         target.loc -= get_popup_toplevel_coords(&PopupKind::Xdg(popup.clone()));

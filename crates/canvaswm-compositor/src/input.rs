@@ -363,10 +363,15 @@ impl CanvasWM {
             return;
         };
 
-        // Screen-space position
-        let screen_pos = event.position_transformed(output_geo.size) + output_geo.loc.to_f64();
+        // Get the raw position normalized to the output size, giving us a
+        // position in [0..output_geo.size].  Do NOT add output_geo.loc —
+        // we need screen-space coordinates (0-based) so that screen_to_canvas
+        // can correctly convert them to canvas space at any zoom level.
+        let raw = event.position_transformed(output_geo.size);
+        let screen_x = raw.x;
+        let screen_y = raw.y;
         let old_cursor = self.cursor_pos;
-        self.cursor_pos = Point::from((screen_pos.x, screen_pos.y));
+        self.cursor_pos = Point::from((screen_x, screen_y));
 
         // If panning (Super+LMB), move the viewport
         if self.panning {
@@ -383,7 +388,7 @@ impl CanvasWM {
         };
 
         // Convert screen position to canvas position for focus
-        let (cx, cy) = self.viewport.screen_to_canvas(screen_pos.x, screen_pos.y);
+        let (cx, cy) = self.viewport.screen_to_canvas(screen_x, screen_y);
         let canvas_pos: Point<f64, Logical> = Point::from((cx, cy));
 
         let under = self.surface_under(canvas_pos);

@@ -10,8 +10,9 @@ fn rects_overlap(a: Rect, b: Rect, gap: f64) -> bool {
 
 /// Find a non-overlapping position for a new window near `(cx, cy)`.
 ///
-/// Tries the target position first, then spirals outward in a grid pattern
-/// until a free slot is found. `gap` is the minimum space between windows.
+/// Uses a candidate-edge approach: generates potential positions by sliding
+/// the new window to the edges of existing windows, then picks the closest
+/// non-overlapping candidate to the desired center.
 pub fn find_free_position(
     cx: f64,
     cy: f64,
@@ -24,46 +25,60 @@ pub fn find_free_position(
     let w = if win_w > 0.0 { win_w } else { 600.0 };
     let h = if win_h > 0.0 { win_h } else { 400.0 };
 
-    let candidate = (cx - w / 2.0, cy - h / 2.0, w, h);
+    // Desired top-left (centered on cx, cy)
+    let ideal_x = cx - w / 2.0;
+    let ideal_y = cy - h / 2.0;
+    let ideal = (ideal_x, ideal_y, w, h);
 
-    // Check if the target position is free
-    if !existing.iter().any(|e| rects_overlap(candidate, *e, gap)) {
-        return (candidate.0, candidate.1);
+    // If the ideal position is free, use it
+    if !existing.iter().any(|e| rects_overlap(ideal, *e, gap)) {
+        return (ideal_x, ideal_y);
     }
 
-    // Spiral outward: try offsets in expanding rings
-    let step_x = w + gap;
-    let step_y = h + gap;
-    for ring in 1..20 {
-        let r = ring as f64;
-        // Try positions around the ring (right, down, left, up, and corners)
-        let offsets = [
-            (r, 0.0),
-            (-r, 0.0),
-            (0.0, r),
-            (0.0, -r),
-            (r, r),
-            (-r, r),
-            (r, -r),
-            (-r, -r),
-            (r, 0.5 * r),
-            (-r, 0.5 * r),
-            (0.5 * r, r),
-            (0.5 * r, -r),
-        ];
-        for (dx, dy) in offsets {
-            let nx = cx - w / 2.0 + dx * step_x;
-            let ny = cy - h / 2.0 + dy * step_y;
-            let cand = (nx, ny, w, h);
-            if !existing.iter().any(|e| rects_overlap(cand, *e, gap)) {
-                return (nx, ny);
-            }
+    // Generate candidate positions by placing the new window adjacent to
+    // each existing window's edges (right, left, below, above), aligned
+    // vertically/horizontally to the desired center.
+    let mut candidates: Vec<(f64, f64)> = Vec::new();
+
+    for &(ex, ey, ew, eh) in existing {
+        // Right of existing window
+        candidates.push((ex + ew + gap, cy - h / 2.0));
+        // Left of existing window
+        candidates.push((ex - w - gap, cy - h / 2.0));
+        // Below existing window
+        candidates.push((cx - w / 2.0, ey + eh + gap));
+        // Above existing window
+        candidates.push((cx - w / 2.0, ey - h - gap));
+
+        // Also try aligning tops/bottoms
+        candidates.push((ex + ew + gap, ey));
+        candidates.push((ex - w - gap, ey));
+        candidates.push((ex + ew + gap, ey + eh - h));
+        candidates.push((ex - w - gap, ey + eh - h));
+    }
+
+    // Score each candidate by distance to the ideal position, pick closest free one
+    let mut best: Option<(f64, f64, f64)> = None; // (x, y, dist²)
+    for (px, py) in candidates {
+        let cand = (px, py, w, h);
+        if existing.iter().any(|e| rects_overlap(cand, *e, gap)) {
+            continue;
         }
+        let dx = px - ideal_x;
+        let dy = py - ideal_y;
+        let dist2 = dx * dx + dy * dy;
+        if best.is_none() || dist2 < best.unwrap().2 {
+            best = Some((px, py, dist2));
+        }
+    }
+
+    if let Some((bx, by, _)) = best {
+        return (bx, by);
     }
 
     // Fallback: cascade offset from last existing window
     let n = existing.len() as f64;
-    (cx - w / 2.0 + n * 30.0, cy - h / 2.0 + n * 30.0)
+    (ideal_x + n * 30.0, ideal_y + n * 30.0)
 }
 
 /// Push overlapping windows apart (single iteration).
@@ -117,13 +132,7 @@ pub fn resolve_collisions(
         .into_iter()
         .enumerate()
         .filter(|(_, (dx, dy))| dx.abs() > 0.5 || dy.abs() > 0.5)
-        .map(|(i, (dx, dy))| {
-            (
-                i,
-                windows[i].0 + dx,
-                windows[i].1 + dy,
-            )
-        })
+        .map(|(i, (dx, dy))| (i, windows[i].0 + dx, windows[i].1 + dy))
         .collect()
 }
 
@@ -141,16 +150,28 @@ mod tests {
     fn test_avoids_existing_window() {
         let existing = vec![(200.0, 100.0, 600.0, 400.0)];
         let pos = find_free_position(500.0, 300.0, 600.0, 400.0, &existing, 10.0);
-        // Should NOT be at (200, 100) since that's taken
-        assert!(pos.0 != 200.0 || pos.1 != 100.0);
+        // Should NOT overlap with the existing window
+        let new_rect = (pos.0, pos.1, 600.0, 400.0);
+        assert!(!rects_overlap(new_rect, existing[0], 10.0));
+    }
+
+    #[test]
+    fn test_placed_adjacent_no_gap_violation() {
+        // Existing window at (100, 100, 600, 400)
+        let existing = vec![(100.0, 100.0, 600.0, 400.0)];
+        let gap = 20.0;
+        let pos = find_free_position(400.0, 300.0, 600.0, 400.0, &existing, gap);
+        let new_rect = (pos.0, pos.1, 600.0, 400.0);
+        // Must not overlap (respecting gap)
+        assert!(!rects_overlap(new_rect, existing[0], gap));
+        // Should be reasonably close to intended center
+        let dist = ((pos.0 + 300.0 - 400.0).powi(2) + (pos.1 + 200.0 - 300.0).powi(2)).sqrt();
+        assert!(dist < 1500.0, "placed too far away: dist={dist}");
     }
 
     #[test]
     fn test_collision_resolution() {
-        let windows = vec![
-            (0.0, 0.0, 100.0, 100.0),
-            (50.0, 50.0, 100.0, 100.0),
-        ];
+        let windows = vec![(0.0, 0.0, 100.0, 100.0), (50.0, 50.0, 100.0, 100.0)];
         let moves = resolve_collisions(&windows, 0.0, 1.0);
         assert!(!moves.is_empty());
     }

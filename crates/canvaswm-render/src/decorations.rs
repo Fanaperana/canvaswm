@@ -52,7 +52,8 @@ void main() {
     if (pos.x > 1.0 - r && pos.y < r) {
         d = 1.0 - smoothstep(r - 1.0, r, length(pos - vec2(1.0 - r, r)));
     }
-    gl_FragColor = u_color * alpha * d;
+    float a = u_color.a * alpha * d;
+    gl_FragColor = vec4(u_color.rgb * a, a);
 }
 "#;
 
@@ -85,7 +86,8 @@ void main() {
     float shadow = 1.0 - smoothstep(0.0, u_spread, dist);
     shadow = shadow * shadow; // softer falloff
     
-    gl_FragColor = vec4(u_shadow_color.rgb, u_shadow_color.a * shadow * alpha);
+    float a = u_shadow_color.a * shadow * alpha;
+    gl_FragColor = vec4(u_shadow_color.rgb * a, a);
 }
 "#;
 
@@ -116,10 +118,8 @@ void main() {
     // Border region: outside inner, inside outer
     float border = smoothstep(0.5, -0.5, outer) * smoothstep(-0.5, 0.5, inner);
     
-    // Corner rounding mask for the outer edge
-    float mask = smoothstep(0.5, -0.5, outer);
-    
-    gl_FragColor = vec4(u_color.rgb, u_color.a * border * alpha);
+    float a = u_color.a * border * alpha;
+    gl_FragColor = vec4(u_color.rgb * a, a);
 }
 "#;
 
@@ -145,7 +145,8 @@ void main() {
     // Inside rounded rect: transparent (window shows through)
     // Outside rounded rect (corners): background color covers sharp edges
     float outside = smoothstep(-0.5, 0.5, dist);
-    gl_FragColor = vec4(u_bg_color.rgb, u_bg_color.a * outside * alpha);
+    float a = u_bg_color.a * outside * alpha;
+    gl_FragColor = vec4(u_bg_color.rgb * a, a);
 }
 "#;
 
@@ -369,7 +370,10 @@ pub fn generate_decoration_elements(
                 border_color,
                 scaled_radius + scaled_border,
                 scaled_border,
-                ((win.screen_w + bw * 2) as f32, (win.screen_h + bw * 2) as f32),
+                (
+                    (win.screen_w + bw * 2) as f32,
+                    (win.screen_h + bw * 2) as f32,
+                ),
             );
             elements.push(CanvasRenderElement::Shader(PixelShaderElement::new(
                 shaders.border.clone(),

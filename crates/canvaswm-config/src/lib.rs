@@ -38,6 +38,33 @@ pub struct Config {
     pub env: HashMap<String, String>,
     /// Window rules for per-app customization.
     pub window_rules: Vec<WindowRule>,
+    /// Built-in panel / taskbar settings.
+    pub panel: PanelConfig,
+}
+
+/// Built-in panel / taskbar configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PanelConfig {
+    /// Whether the panel is enabled.
+    pub enabled: bool,
+    /// Panel position: "top" or "bottom".
+    pub position: String,
+    /// Panel height in pixels.
+    pub height: i32,
+    /// Background color [r, g, b, a].
+    pub background_color: [f32; 4],
+}
+
+impl Default for PanelConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            position: "top".into(),
+            height: 32,
+            background_color: [0.08, 0.08, 0.12, 0.85],
+        }
+    }
 }
 
 /// Keyboard layout and repeat settings.
@@ -221,8 +248,6 @@ pub struct WindowRule {
 
 // ── Defaults ──
 
-
-
 impl Default for KeyboardConfig {
     fn default() -> Self {
         Self {
@@ -352,7 +377,6 @@ impl Default for OutputConfig {
         Self { scale: 1.0 }
     }
 }
-
 
 // ── Loading ──
 

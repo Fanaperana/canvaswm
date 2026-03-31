@@ -7,10 +7,8 @@
 use smithay::{
     backend::{
         renderer::{
-            damage::OutputDamageTracker,
-            element::surface::WaylandSurfaceRenderElement,
-            element::utils::RescaleRenderElement,
-            gles::GlesRenderer,
+            damage::OutputDamageTracker, element::surface::WaylandSurfaceRenderElement,
+            element::utils::RescaleRenderElement, gles::GlesRenderer,
         },
         winit::{self, WinitEvent},
     },
@@ -22,7 +20,7 @@ use std::time::Duration;
 
 use canvaswm_render::{
     decorations::{self, DecorationParams, DecorationShaders, WindowInfo},
-    minimap, Background, CanvasRenderElement,
+    minimap, panel, Background, CanvasRenderElement,
 };
 
 use crate::CanvasWM;
@@ -162,18 +160,12 @@ pub fn init_winit(
 
                         let vis_w = (size.w as f64 / zoom).ceil() as i32 + CULL_MARGIN;
                         let vis_h = (size.h as f64 / zoom).ceil() as i32 + CULL_MARGIN;
-                        let visible_region = Rectangle::new(
-                            (cam_x, cam_y).into(),
-                            (vis_w, vis_h).into(),
-                        );
+                        let visible_region =
+                            Rectangle::new((cam_x, cam_y).into(), (vis_w, vis_h).into());
 
-                        let raw: Vec<WaylandSurfaceRenderElement<GlesRenderer>> =
-                            state.space.render_elements_for_region(
-                                renderer,
-                                &visible_region,
-                                1.0,
-                                1.0,
-                            );
+                        let raw: Vec<WaylandSurfaceRenderElement<GlesRenderer>> = state
+                            .space
+                            .render_elements_for_region(renderer, &visible_region, 1.0, 1.0);
 
                         let zoom_scale: Scale<f64> = Scale::from((zoom, zoom));
                         let origin = Point::<i32, Physical>::from((0, 0));
@@ -206,15 +198,14 @@ pub fn init_winit(
 
                         // 4. Minimap
                         let mm_windows = collect_minimap_windows(state);
-                        let minimap_elems: Vec<CanvasRenderElement> =
-                            minimap::minimap_elements(
-                                &state.viewport,
-                                (size.w, size.h),
-                                &mm_windows,
-                            )
-                            .into_iter()
-                            .map(CanvasRenderElement::from)
-                            .collect();
+                        let minimap_elems: Vec<CanvasRenderElement> = minimap::minimap_elements(
+                            &state.viewport,
+                            (size.w, size.h),
+                            &mm_windows,
+                        )
+                        .into_iter()
+                        .map(CanvasRenderElement::from)
+                        .collect();
 
                         let minimap_clip: Vec<CanvasRenderElement> = match deco_shaders {
                             Some(ref s) => minimap::minimap_clip_element(
@@ -227,8 +218,41 @@ pub fn init_winit(
                             None => Vec::new(),
                         };
 
-                        // 5. Compose (front → back)
-                        let total = minimap_clip.len()
+                        // 5. Panel
+                        let panel_position = match state.config.panel.position.as_str() {
+                            "bottom" => panel::PanelPosition::Bottom,
+                            _ => panel::PanelPosition::Top,
+                        };
+                        let panel_elems: Vec<CanvasRenderElement> = if state.config.panel.enabled {
+                            let pw = collect_panel_windows(state);
+                            panel::panel_elements(panel_position, (size.w, size.h), &pw)
+                                .into_iter()
+                                .map(CanvasRenderElement::from)
+                                .collect()
+                        } else {
+                            Vec::new()
+                        };
+
+                        let panel_clip: Vec<CanvasRenderElement> = if state.config.panel.enabled {
+                            match deco_shaders {
+                                Some(ref s) => panel::panel_clip_element(
+                                    s,
+                                    panel_position,
+                                    (size.w, size.h),
+                                    state.config.background.color,
+                                )
+                                .into_iter()
+                                .collect(),
+                                None => Vec::new(),
+                            }
+                        } else {
+                            Vec::new()
+                        };
+
+                        // 6. Compose (front → back)
+                        let total = panel_clip.len()
+                            + panel_elems.len()
+                            + minimap_clip.len()
                             + minimap_elems.len()
                             + corner_clip_elements.len()
                             + space_elements.len()
@@ -236,6 +260,8 @@ pub fn init_winit(
                             + bg_elements.len();
 
                         let mut all = Vec::with_capacity(total);
+                        all.extend(panel_clip);
+                        all.extend(panel_elems);
                         all.extend(minimap_clip);
                         all.extend(minimap_elems);
                         all.extend(corner_clip_elements);
@@ -297,8 +323,7 @@ fn collect_window_infos(state: &CanvasWM, zoom: f64) -> Vec<WindowInfo> {
             let geo = window.geometry();
             let bbox = window.bbox();
 
-            let (screen_x, screen_y) =
-                state.viewport.canvas_to_screen(loc.x as f64, loc.y as f64);
+            let (screen_x, screen_y) = state.viewport.canvas_to_screen(loc.x as f64, loc.y as f64);
             let screen_w = (geo.size.w as f64 * zoom) as i32;
             let screen_h = (geo.size.h as f64 * zoom) as i32;
 
@@ -362,6 +387,19 @@ fn collect_minimap_windows(state: &CanvasWM) -> Vec<minimap::MinimapWindow> {
                 h: geo.size.h as f64,
                 focused: focused == Some(window),
             })
+        })
+        .collect()
+}
+
+/// Collect [`panel::PanelWindow`] entries for every mapped window.
+fn collect_panel_windows(state: &CanvasWM) -> Vec<panel::PanelWindow> {
+    let focused = state.focus_history.first();
+
+    state
+        .space
+        .elements()
+        .map(|window| panel::PanelWindow {
+            focused: focused == Some(window),
         })
         .collect()
 }

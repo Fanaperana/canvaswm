@@ -5,9 +5,11 @@ pub mod dot_grid;
 pub mod element;
 pub mod image_bg;
 pub mod minimap;
+pub mod panel;
 pub mod shader_bg;
 
 pub use background::Background;
 pub use decorations::{DecorationParams, DecorationShaders, WindowInfo};
 pub use element::CanvasRenderElement;
 pub use minimap::MinimapWindow;
+pub use panel::{PanelPosition, PanelWindow};

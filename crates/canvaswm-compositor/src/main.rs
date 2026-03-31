@@ -46,7 +46,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Set WAYLAND_DISPLAY so child processes connect to us
     std::env::set_var("WAYLAND_DISPLAY", &state.socket_name);
 
-    // Set env vars from config
+    // Ensure terminals get proper color support (standard Wayland compositor practice)
+    if std::env::var_os("TERM").is_none() {
+        std::env::set_var("TERM", "xterm-256color");
+    }
+    if std::env::var_os("COLORTERM").is_none() {
+        std::env::set_var("COLORTERM", "truecolor");
+    }
+
+    // Set env vars from config (can override the defaults above)
     for (k, v) in &state.config.env {
         std::env::set_var(k, v);
     }

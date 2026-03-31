@@ -58,6 +58,8 @@ pub struct CanvasWM {
     pub focus_history: Vec<Window>,
     /// Current Alt-Tab cycle index (None = not cycling).
     pub cycle_state: Option<usize>,
+    /// Whether any window currently has active focus.
+    pub active_focus: bool,
 
     // -- Edge auto-pan --
     /// Current edge pan velocity (screen-space px/frame), None = not panning.
@@ -155,6 +157,7 @@ impl CanvasWM {
             config,
             focus_history: Vec::new(),
             cycle_state: None,
+            active_focus: false,
             edge_pan_velocity: None,
             fullscreen: None,
             state_file_last_write: start_time,
@@ -233,6 +236,7 @@ impl CanvasWM {
     pub fn update_focus_history(&mut self, window: &Window) {
         self.focus_history.retain(|w| w != window);
         self.focus_history.insert(0, window.clone());
+        self.active_focus = true;
     }
 
     /// Cycle windows forward in focus history.
@@ -252,6 +256,7 @@ impl CanvasWM {
         };
         self.cycle_state = Some(idx);
         if let Some(window) = self.focus_history.get(idx).cloned() {
+            self.active_focus = true;
             let serial = smithay::utils::SERIAL_COUNTER.next_serial();
             self.space.raise_element(&window, true);
             if let Some(surface) = window.toplevel().map(|t| t.wl_surface().clone()) {
@@ -281,6 +286,7 @@ impl CanvasWM {
         };
         self.cycle_state = Some(idx);
         if let Some(window) = self.focus_history.get(idx).cloned() {
+            self.active_focus = true;
             let serial = smithay::utils::SERIAL_COUNTER.next_serial();
             self.space.raise_element(&window, true);
             if let Some(surface) = window.toplevel().map(|t| t.wl_surface().clone()) {

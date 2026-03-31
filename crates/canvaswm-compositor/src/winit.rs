@@ -313,7 +313,11 @@ pub fn init_winit(
 
 /// Collect [`WindowInfo`] descriptors for every mapped window.
 fn collect_window_infos(state: &CanvasWM, zoom: f64) -> Vec<WindowInfo> {
-    let focused = state.focus_history.first();
+    let focused = if state.active_focus {
+        state.focus_history.first()
+    } else {
+        None
+    };
 
     state
         .space
@@ -372,7 +376,11 @@ fn build_deco_params(state: &CanvasWM) -> DecorationParams {
 
 /// Collect [`minimap::MinimapWindow`] entries for every mapped window.
 fn collect_minimap_windows(state: &CanvasWM) -> Vec<minimap::MinimapWindow> {
-    let focused = state.focus_history.first();
+    let focused = if state.active_focus {
+        state.focus_history.first()
+    } else {
+        None
+    };
 
     state
         .space
@@ -393,7 +401,11 @@ fn collect_minimap_windows(state: &CanvasWM) -> Vec<minimap::MinimapWindow> {
 
 /// Collect [`panel::PanelWindow`] entries for every mapped window.
 fn collect_panel_windows(state: &CanvasWM) -> Vec<panel::PanelWindow> {
-    let focused = state.focus_history.first();
+    let focused = if state.active_focus {
+        state.focus_history.first()
+    } else {
+        None
+    };
 
     state
         .space

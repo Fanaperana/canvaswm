@@ -168,7 +168,11 @@ fn handle_request(req: &IpcRequest, state: &mut CanvasWM) -> IpcResponse {
             })
         }
         "get_windows" => {
-            let focused = state.focus_history.first();
+            let focused = if state.active_focus {
+                state.focus_history.first()
+            } else {
+                None
+            };
             let windows: Vec<WindowInfo> = state
                 .space
                 .elements()

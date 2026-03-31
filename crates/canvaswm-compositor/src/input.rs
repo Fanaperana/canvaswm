@@ -521,6 +521,7 @@ impl CanvasWM {
                     }
                 });
                 keyboard.set_focus(self, Option::<WlSurface>::None, serial);
+                self.active_focus = false;
             }
         }
 

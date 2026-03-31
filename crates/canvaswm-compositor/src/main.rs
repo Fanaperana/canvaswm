@@ -43,6 +43,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         crate::winit::init_winit(&mut event_loop, &mut state)?;
     }
 
+    // Start XWayland for X11 application compatibility.
+    start_xwayland(&mut event_loop, &mut state);
+
     // Set WAYLAND_DISPLAY so child processes connect to us
     std::env::set_var("WAYLAND_DISPLAY", &state.socket_name);
 
@@ -82,11 +85,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("║  Super+Arrow        Navigate to window                ║");
     println!("║  Super+Home         Home toggle                       ║");
     println!("║  Super+R            Reload config                     ║");
+    println!("║  Super+1..4         Jump to canvas anchor             ║");
+    println!("║  Super+L            Lock screen                       ║");
     println!("║  Alt+Tab            Cycle windows                     ║");
     println!("║  Super+0            Reset viewport                    ║");
     println!("║  Alt+LMB drag       Move window                       ║");
     println!("║  MMB drag           Move window (nested mode)         ║");
     println!("║  Alt+RMB drag       Resize window                     ║");
+    println!("║  3-finger swipe     Pan canvas (trackpad)             ║");
+    println!("║  2-finger pinch     Zoom canvas (trackpad)            ║");
     println!("║  Super+Escape       Quit                              ║");
     println!("╚════════════════════════════════════════════════════════╝");
     println!();
@@ -133,5 +140,59 @@ fn spawn_client() {
                 }
             }
         }
+    }
+}
+
+/// Start XWayland and register its event source with the event loop.
+///
+/// When XWayland is ready, the `XWaylandEvent::Ready` callback creates an
+/// `X11Wm` and stores it in `state.xwm`. X11 applications then go through
+/// the `XwmHandler` impl in `handlers/xwayland.rs`.
+fn start_xwayland(event_loop: &mut EventLoop<'static, CanvasWM>, state: &mut CanvasWM) {
+    use smithay::xwayland::{XWayland, XWaylandEvent};
+
+    let (xwayland, client) = match XWayland::spawn(
+        &state.display_handle,
+        None,
+        std::iter::empty::<(String, String)>(),
+        true,
+        std::process::Stdio::null(),
+        std::process::Stdio::null(),
+        |_user_data| {},
+    ) {
+        Ok(pair) => pair,
+        Err(e) => {
+            tracing::warn!("Failed to start XWayland: {e}");
+            return;
+        }
+    };
+
+    let loop_handle = event_loop.handle();
+    if let Err(e) = loop_handle.insert_source(xwayland, move |event, _, state| match event {
+        XWaylandEvent::Ready {
+            x11_socket,
+            display_number,
+        } => {
+            std::env::set_var("DISPLAY", format!(":{display_number}"));
+            match smithay::xwayland::X11Wm::start_wm(
+                state.loop_handle.clone(),
+                x11_socket,
+                client.clone(),
+            ) {
+                Ok(wm) => {
+                    tracing::info!("X11Wm started for DISPLAY=:{display_number}");
+                    state.xwm = Some(wm);
+                }
+                Err(e) => {
+                    tracing::error!("Failed to start X11Wm: {e}");
+                }
+            }
+        }
+        XWaylandEvent::Error => {
+            tracing::error!("XWayland crashed");
+            state.xwm = None;
+        }
+    }) {
+        tracing::error!("Failed to register XWayland event source: {e}");
     }
 }

@@ -39,6 +39,12 @@ pub enum Action {
     Exec(String),
     /// Quit the compositor.
     Quit,
+    /// Jump camera to configured anchor by index (Super+1..4).
+    GoToAnchor(usize),
+    /// Lock the screen (spawn swaylock or similar).
+    LockScreen,
+    /// Send focused window to adjacent output.
+    SendToOutput(Direction),
 }
 
 /// Cardinal + diagonal directions for navigation.

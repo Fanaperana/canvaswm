@@ -40,6 +40,8 @@ pub struct Config {
     pub window_rules: Vec<WindowRule>,
     /// Built-in panel / taskbar settings.
     pub panel: PanelConfig,
+    /// Keyboard focus follows pointer without clicking.
+    pub focus_follows_mouse: bool,
 }
 
 /// Built-in panel / taskbar configuration.
@@ -106,6 +108,8 @@ pub struct NavigationConfig {
     pub nudge_step: f64,
     /// Pixels per keyboard pan-viewport action.
     pub pan_step: f64,
+    /// Canvas anchor positions reachable via Super+1..4. Y-up convention.
+    pub anchors: Vec<[f64; 2]>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -152,6 +156,9 @@ pub struct EffectsConfig {
 pub struct BackgroundConfig {
     /// "shader", "dots", "solid", or "image".
     pub mode: String,
+    /// Re-render background every frame (for animated shaders using u_time).
+    /// Default false — background is cached and only redrawn on pan/zoom.
+    pub animate: bool,
     /// Path to custom GLSL fragment shader (for mode "shader").
     pub shader_path: Option<String>,
     /// Path to background image file (for mode "image"). Supports PNG, JPEG, WebP.
@@ -277,6 +284,7 @@ impl Default for NavigationConfig {
             animation_speed: 0.3,
             nudge_step: 20.0,
             pan_step: 100.0,
+            anchors: vec![[0.0, 0.0]],
         }
     }
 }
@@ -318,6 +326,7 @@ impl Default for BackgroundConfig {
     fn default() -> Self {
         Self {
             mode: "dots".into(),
+            animate: false,
             shader_path: None,
             image_path: None,
             image_mode: "fill".into(),
@@ -445,17 +454,50 @@ impl Config {
 
     /// Validate config without starting the compositor.
     /// If path is None, search default locations.
+    /// Returns Ok if no config file exists (built-in defaults are always valid).
     pub fn validate(path: Option<&PathBuf>) -> Result<(), String> {
         if let Some(p) = path {
-            let _config = Self::load_from(p)?;
+            let config = Self::load_from(p)?;
+            config.validate_ranges()?;
         } else {
             for p in config_paths() {
                 if p.exists() {
-                    let _config = Self::load_from(&p)?;
+                    let config = Self::load_from(&p)?;
+                    config.validate_ranges()?;
                     return Ok(());
                 }
             }
-            return Err("No config file found".into());
+            // No file found — defaults are always valid
+        }
+        Ok(())
+    }
+
+    /// Check that all config values are within valid ranges.
+    fn validate_ranges(&self) -> Result<(), String> {
+        if self.zoom.step <= 1.0 {
+            return Err(format!("zoom.step must be > 1.0, got {}", self.zoom.step));
+        }
+        if self.zoom.max_zoom <= 0.0 {
+            return Err(format!(
+                "zoom.max_zoom must be > 0.0, got {}",
+                self.zoom.max_zoom
+            ));
+        }
+        if !(0.0..=1.0).contains(&self.scroll.friction) {
+            return Err(format!(
+                "scroll.friction must be 0.0–1.0, got {}",
+                self.scroll.friction
+            ));
+        }
+        for rule in &self.window_rules {
+            if let Some(op) = rule.opacity {
+                if !(0.0..=1.0).contains(&op) {
+                    return Err(format!("window_rules opacity must be 0.0–1.0, got {op}"));
+                }
+            }
+            if rule.app_id.is_none() && rule.title.is_none() {
+                return Err("window_rules entry must have app_id and/or title".into());
+            }
         }
         Ok(())
     }

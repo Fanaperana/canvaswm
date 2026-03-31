@@ -7,14 +7,19 @@
 use smithay::{
     backend::{
         renderer::{
-            damage::OutputDamageTracker, element::surface::WaylandSurfaceRenderElement,
-            element::utils::RescaleRenderElement, gles::GlesRenderer,
+            damage::OutputDamageTracker,
+            element::surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
+            element::utils::RescaleRenderElement,
+            element::Kind,
+            gles::GlesRenderer,
         },
         winit::{self, WinitEvent},
     },
+    desktop::{layer_map_for_output, LayerSurface},
     output::{Mode, Output, PhysicalProperties, Subpixel},
     reexports::calloop::EventLoop,
     utils::{Physical, Point, Rectangle, Scale, Transform},
+    wayland::shell::wlr_layer::Layer,
 };
 use std::time::Duration;
 
@@ -40,7 +45,7 @@ const CULL_MARGIN: i32 = 2;
 // ---------------------------------------------------------------------------
 
 pub fn init_winit(
-    event_loop: &mut EventLoop<CanvasWM>,
+    event_loop: &mut EventLoop<'static, CanvasWM>,
     state: &mut CanvasWM,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (mut backend, winit) = winit::init()?;
@@ -143,11 +148,18 @@ pub fn init_winit(
                         let (renderer, mut framebuffer) = backend.bind().unwrap();
 
                         // 1. Background
+                        // Pass elapsed time only when animated backgrounds are enabled;
+                        // pass 0.0 otherwise to freeze shader animation and save GPU.
+                        let bg_time = if state.config.background.animate {
+                            state.start_time.elapsed().as_secs_f32()
+                        } else {
+                            0.0
+                        };
                         let bg_elements = background.render_elements(
                             renderer,
                             &state.viewport,
                             (size.w, size.h),
-                            state.start_time.elapsed().as_secs_f32(),
+                            bg_time,
                             state.config.background.dot_color,
                             state.config.background.grid_spacing,
                             state.config.background.dot_size,
@@ -274,17 +286,36 @@ pub fn init_winit(
                             Vec::new()
                         };
 
-                        // 6. Compose (front → back)
-                        let total = panel_clip.len()
+                        // 6. Layer-shell surfaces (screen-fixed, not zoomed)
+                        let (layer_background, layer_bottom) = render_layer_surfaces(
+                            renderer,
+                            &output,
+                            &[Layer::Background, Layer::Bottom],
+                        );
+                        let (layer_top, layer_overlay) = render_layer_surfaces(
+                            renderer,
+                            &output,
+                            &[Layer::Top, Layer::Overlay],
+                        );
+
+                        // 7. Compose (front → back):
+                        //    overlay > top > panel > minimap > windows > bottom > background > bg_shader
+                        let total = layer_overlay.len()
+                            + layer_top.len()
+                            + panel_clip.len()
                             + panel_elems.len()
                             + minimap_clip.len()
                             + minimap_elems.len()
                             + corner_clip_elements.len()
                             + space_elements.len()
                             + deco_elements.len()
+                            + layer_bottom.len()
+                            + layer_background.len()
                             + bg_elements.len();
 
                         let mut all = Vec::with_capacity(total);
+                        all.extend(layer_overlay.into_iter().map(CanvasRenderElement::Surface));
+                        all.extend(layer_top.into_iter().map(CanvasRenderElement::Surface));
                         all.extend(panel_clip);
                         all.extend(panel_elems);
                         all.extend(minimap_clip);
@@ -292,6 +323,8 @@ pub fn init_winit(
                         all.extend(corner_clip_elements);
                         all.extend(space_elements);
                         all.extend(deco_elements);
+                        all.extend(layer_bottom.into_iter().map(CanvasRenderElement::Surface));
+                        all.extend(layer_background.into_iter().map(CanvasRenderElement::Surface));
                         all.extend(bg_elements);
 
                         damage_tracker
@@ -425,8 +458,7 @@ fn collect_minimap_windows(state: &CanvasWM) -> Vec<minimap::MinimapWindow> {
 }
 
 /// Collect [`panel::PanelWindow`] entries for every mapped window.
-fn collect_panel_windows(state: &CanvasWM) -> Vec<panel::PanelWindow> {
-    let focused = if state.active_focus {
+fn collect_panel_windows(state: &CanvasWM) -> Vec<panel::PanelWindow> {    let focused = if state.active_focus {
         state.focus_history.first()
     } else {
         None
@@ -439,4 +471,48 @@ fn collect_panel_windows(state: &CanvasWM) -> Vec<panel::PanelWindow> {
             focused: focused == Some(window),
         })
         .collect()
+}
+
+/// Render layer-shell surfaces for the specified layers.
+///
+/// Returns a `(first_group, second_group)` pair corresponding to the first and
+/// second layer in the `layers` slice.  Surfaces are positioned in screen
+/// space, not scaled by the canvas zoom.
+fn render_layer_surfaces(
+    renderer: &mut GlesRenderer,
+    output: &Output,
+    layers: &[Layer],
+) -> (
+    Vec<WaylandSurfaceRenderElement<GlesRenderer>>,
+    Vec<WaylandSurfaceRenderElement<GlesRenderer>>,
+) {
+    let layer_map = layer_map_for_output(output);
+    let mut first = Vec::new();
+    let mut second = Vec::new();
+
+    for (idx, &layer) in layers.iter().enumerate() {
+        for surface in layer_map.layers_on(layer) {
+            let elems = render_layer_surface_elements(renderer, &layer_map, surface);
+            if idx == 0 {
+                first.extend(elems);
+            } else {
+                second.extend(elems);
+            }
+        }
+    }
+    (first, second)
+}
+
+/// Render a single layer surface (and its sub-surfaces) into render elements.
+fn render_layer_surface_elements(
+    renderer: &mut GlesRenderer,
+    layer_map: &smithay::desktop::LayerMap,
+    surface: &LayerSurface,
+) -> Vec<WaylandSurfaceRenderElement<GlesRenderer>> {
+    let geo = match layer_map.layer_geometry(surface) {
+        Some(g) => g,
+        None => return Vec::new(),
+    };
+    let location = Point::<i32, Physical>::from((geo.loc.x, geo.loc.y));
+    render_elements_from_surface_tree(renderer, surface.wl_surface(), location, 1.0, 1.0, Kind::Unspecified)
 }

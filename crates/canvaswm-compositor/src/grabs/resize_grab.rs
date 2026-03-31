@@ -39,6 +39,22 @@ impl From<xdg_toplevel::ResizeEdge> for ResizeEdge {
     }
 }
 
+impl From<smithay::xwayland::xwm::ResizeEdge> for ResizeEdge {
+    fn from(e: smithay::xwayland::xwm::ResizeEdge) -> Self {
+        use smithay::xwayland::xwm::ResizeEdge as X;
+        match e {
+            X::Top => Self::TOP,
+            X::Bottom => Self::BOTTOM,
+            X::Left => Self::LEFT,
+            X::Right => Self::RIGHT,
+            X::TopLeft => Self::TOP_LEFT,
+            X::BottomLeft => Self::BOTTOM_LEFT,
+            X::TopRight => Self::TOP_RIGHT,
+            X::BottomRight => Self::BOTTOM_RIGHT,
+        }
+    }
+}
+
 pub struct ResizeSurfaceGrab {
     start_data: PointerGrabStartData<CanvasWM>,
     window: Window,

@@ -70,7 +70,7 @@ pub struct DrmBackendData {
 /// 3. Libinput for input device handling
 /// 4. DRM devices for each connected GPU
 pub fn init_drm(
-    event_loop: &mut EventLoop<CanvasWM>,
+    event_loop: &mut EventLoop<'static, CanvasWM>,
     _state: &mut CanvasWM,
 ) -> Result<DrmBackendData, Box<dyn std::error::Error>> {
     // Initialize session

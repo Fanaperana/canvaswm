@@ -14,6 +14,7 @@ use smithay::{
         },
         shm::{ShmHandler, ShmState},
     },
+    xwayland::XWaylandClientData,
 };
 
 use super::xdg_shell;
@@ -24,7 +25,15 @@ impl CompositorHandler for CanvasWM {
     }
 
     fn client_compositor_state<'a>(&self, client: &'a Client) -> &'a CompositorClientState {
-        &client.get_data::<ClientState>().expect("client missing ClientState").compositor_state
+        // Normal Wayland clients use ClientState; XWayland's internal client
+        // uses XWaylandClientData which carries its own CompositorClientState.
+        if let Some(state) = client.get_data::<ClientState>() {
+            return &state.compositor_state;
+        }
+        if let Some(state) = client.get_data::<XWaylandClientData>() {
+            return &state.compositor_state;
+        }
+        panic!("client missing ClientState or XWaylandClientData");
     }
 
     fn commit(&mut self, surface: &WlSurface) {

@@ -2,7 +2,9 @@ use std::time::Instant;
 
 use smithay::{
     backend::input::{
-        Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent, KeyState, KeyboardKeyEvent,
+        Axis, AxisSource, ButtonState, Event, GestureBeginEvent, GesturePinchBeginEvent,
+        GesturePinchUpdateEvent, GestureSwipeBeginEvent, GestureSwipeEndEvent,
+        GestureSwipeUpdateEvent, InputBackend, InputEvent, KeyState, KeyboardKeyEvent,
         PointerAxisEvent, PointerButtonEvent, PointerMotionAbsoluteEvent,
     },
     input::{
@@ -39,6 +41,24 @@ impl CanvasWM {
             }
             InputEvent::PointerAxis { event, .. } => {
                 self.handle_pointer_axis(event);
+            }
+            InputEvent::GestureSwipeBegin { event, .. } => {
+                self.handle_gesture_swipe_begin(event);
+            }
+            InputEvent::GestureSwipeUpdate { event, .. } => {
+                self.handle_gesture_swipe_update(event);
+            }
+            InputEvent::GestureSwipeEnd { event, .. } => {
+                self.handle_gesture_swipe_end(event);
+            }
+            InputEvent::GesturePinchBegin { event, .. } => {
+                self.handle_gesture_pinch_begin(event);
+            }
+            InputEvent::GesturePinchUpdate { event, .. } => {
+                self.handle_gesture_pinch_update(event);
+            }
+            InputEvent::GesturePinchEnd { .. } => {
+                self.gesture_pinch_last_scale = 1.0;
             }
             _ => {}
         }
@@ -94,6 +114,23 @@ impl CanvasWM {
                             }
                             keysyms::KEY_r => return FilterResult::Intercept(Action::ReloadConfig),
                             keysyms::KEY_Escape => return FilterResult::Intercept(Action::Quit),
+                            // Jump to canvas anchors
+                            keysyms::KEY_1 => {
+                                return FilterResult::Intercept(Action::GoToAnchor(0))
+                            }
+                            keysyms::KEY_2 => {
+                                return FilterResult::Intercept(Action::GoToAnchor(1))
+                            }
+                            keysyms::KEY_3 => {
+                                return FilterResult::Intercept(Action::GoToAnchor(2))
+                            }
+                            keysyms::KEY_4 => {
+                                return FilterResult::Intercept(Action::GoToAnchor(3))
+                            }
+                            // Lock screen
+                            keysyms::KEY_l => {
+                                return FilterResult::Intercept(Action::LockScreen)
+                            }
                             // Directional navigation: Super+Arrow
                             keysyms::KEY_Left => {
                                 return FilterResult::Intercept(Action::NavigateDirection(
@@ -290,6 +327,21 @@ impl CanvasWM {
             Action::Quit => {
                 self.loop_signal.stop();
             }
+            Action::GoToAnchor(idx) => {
+                self.go_to_anchor(idx);
+            }
+            Action::LockScreen => {
+                // Spawn the configured locker (swaylock is the default).
+                let locker = std::env::var("CANVASWM_LOCKER")
+                    .unwrap_or_else(|_| "swaylock".to_string());
+                if let Err(e) = std::process::Command::new(&locker).spawn() {
+                    tracing::warn!("Failed to spawn locker '{}': {}", locker, e);
+                }
+            }
+            Action::SendToOutput(_dir) => {
+                // Multi-output: move focused window to adjacent output.
+                // Requires multi-output support (REQ-06); no-op until then.
+            }
         }
     }
 
@@ -403,6 +455,26 @@ impl CanvasWM {
             },
         );
         pointer.frame(self);
+
+        // Focus-follows-mouse: focus hovered window without click.
+        if self.config.focus_follows_mouse {
+            if let Some((window, _)) = self
+                .space
+                .element_under(canvas_pos)
+                .map(|(w, l)| (w.clone(), l))
+            {
+                if self.focus_history.first() != Some(&window) && !self.is_widget(&window) {
+                    self.space.raise_element(&window, true);
+                    let kbd_serial = SERIAL_COUNTER.next_serial();
+                    if let Some(keyboard) = self.seat.get_keyboard() {
+                        if let Some(surface) = window.toplevel().map(|t| t.wl_surface().clone()) {
+                            keyboard.set_focus(self, Some(surface), kbd_serial);
+                        }
+                    }
+                    self.update_focus_history(&window);
+                }
+            }
+        }
     }
 
     fn handle_pointer_button<I: InputBackend>(&mut self, event: impl PointerButtonEvent<I>) {
@@ -625,5 +697,66 @@ impl CanvasWM {
         };
         pointer.axis(self, frame);
         pointer.frame(self);
+    }
+
+    // ------------------------------------------------------------------
+    // Trackpad gesture handlers
+    // ------------------------------------------------------------------
+
+    fn handle_gesture_swipe_begin<I: InputBackend>(
+        &mut self,
+        event: impl GestureSwipeBeginEvent<I>,
+    ) {
+        self.pan_momentum.stop();
+        self.gesture_swipe_fingers = event.fingers();
+    }
+
+    fn handle_gesture_swipe_update<I: InputBackend>(
+        &mut self,
+        event: impl GestureSwipeUpdateEvent<I>,
+    ) {
+        // 3-finger swipe → pan the canvas.
+        // 2-finger scroll is reported separately as pointer axis events.
+        if self.gesture_swipe_fingers >= 3 {
+            let speed = self.config.scroll.speed;
+            let dx = event.delta().x * speed;
+            let dy = event.delta().y * speed;
+            self.viewport.pan(dx, dy);
+            self.pan_momentum.accumulate(dx, dy, Instant::now());
+        }
+    }
+
+    fn handle_gesture_swipe_end<I: InputBackend>(
+        &mut self,
+        _event: impl GestureSwipeEndEvent<I>,
+    ) {
+        self.pan_momentum.launch();
+    }
+
+    fn handle_gesture_pinch_begin<I: InputBackend>(
+        &mut self,
+        _event: impl GesturePinchBeginEvent<I>,
+    ) {
+        self.gesture_pinch_last_scale = 1.0;
+    }
+
+    fn handle_gesture_pinch_update<I: InputBackend>(
+        &mut self,
+        event: impl GesturePinchUpdateEvent<I>,
+    ) {
+        // scale() is the cumulative scale since gesture began.
+        // Compute relative factor compared to previous frame.
+        let cumulative = event.scale();
+        let relative = if self.gesture_pinch_last_scale > 0.001 {
+            cumulative / self.gesture_pinch_last_scale
+        } else {
+            1.0
+        };
+        self.gesture_pinch_last_scale = cumulative;
+
+        // Clamp to avoid wild jumps (e.g. first frame from 0)
+        let factor = relative.max(0.9).min(1.1);
+        self.viewport
+            .zoom_at(self.cursor_pos.x, self.cursor_pos.y, factor);
     }
 }

@@ -1,5 +1,7 @@
 pub mod compositor;
+pub mod foreign_toplevel;
 pub mod layer_shell;
+pub mod session_lock;
 pub mod xdg_decoration;
 pub mod xdg_shell;
 pub mod xwayland;

@@ -4,7 +4,9 @@ use smithay::{
     desktop::{PopupManager, Space, Window, WindowSurfaceType},
     input::{Seat, SeatState},
     reexports::{
-        calloop::{generic::Generic, EventLoop, Interest, LoopSignal, Mode, PostAction},
+        calloop::{
+            generic::Generic, EventLoop, Interest, LoopHandle, LoopSignal, Mode, PostAction,
+        },
         wayland_server::{
             backend::{ClientData, ClientId, DisconnectReason},
             protocol::wl_surface::WlSurface,
@@ -14,8 +16,10 @@ use smithay::{
     utils::{Logical, Point},
     wayland::{
         compositor::{CompositorClientState, CompositorState},
+        foreign_toplevel_list::{ForeignToplevelHandle, ForeignToplevelListState},
         output::OutputManagerState,
         selection::{data_device::DataDeviceState, primary_selection::PrimarySelectionState},
+        session_lock::SessionLockManagerState,
         shell::{
             wlr_layer::WlrLayerShellState,
             xdg::{decoration::XdgDecorationState, XdgShellState},
@@ -23,6 +27,7 @@ use smithay::{
         shm::ShmState,
         socket::ListeningSocketSource,
         viewporter::ViewporterState,
+        xwayland_shell::XWaylandShellState,
     },
 };
 
@@ -34,6 +39,9 @@ pub struct CanvasWM {
 
     pub socket_name: OsString,
     pub display_handle: DisplayHandle,
+
+    /// calloop handle for registering event sources (e.g. X11Wm).
+    pub loop_handle: LoopHandle<'static, CanvasWM>,
 
     /// The 2D space where windows are mapped (canvas coordinates).
     pub space: Space<Window>,
@@ -70,6 +78,14 @@ pub struct CanvasWM {
     /// Currently fullscreened window + saved state.
     pub fullscreen: Option<FullscreenState>,
 
+    // -- Session lock --
+    /// True while the session is locked (ext-session-lock).
+    pub locked: bool,
+
+    // -- Foreign toplevel tracking --
+    /// Map of Window → ForeignToplevelHandle for `ext-foreign-toplevel-list`.
+    pub toplevel_handles: Vec<(Window, ForeignToplevelHandle)>,
+
     // -- State file --
     /// Last time state file was written.
     pub state_file_last_write: Instant,
@@ -82,6 +98,12 @@ pub struct CanvasWM {
     /// XWayland window manager instance.
     pub xwm: Option<smithay::xwayland::X11Wm>,
 
+    // -- Gesture tracking --
+    /// Accumulated pinch scale since gesture began (reset to 1.0 on GesturePinchBegin).
+    pub gesture_pinch_last_scale: f64,
+    /// Finger count from the last swipe-begin event.
+    pub gesture_swipe_fingers: u32,
+
     // Smithay protocol state
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
@@ -93,6 +115,9 @@ pub struct CanvasWM {
     pub data_device_state: DataDeviceState,
     pub primary_selection_state: PrimarySelectionState,
     pub viewporter_state: ViewporterState,
+    pub session_lock_state: SessionLockManagerState,
+    pub foreign_toplevel_state: ForeignToplevelListState,
+    pub xwayland_shell_state: XWaylandShellState,
     pub popups: PopupManager,
 
     pub seat: Seat<Self>,
@@ -108,7 +133,7 @@ pub struct FullscreenState {
 }
 
 impl CanvasWM {
-    pub fn new(event_loop: &mut EventLoop<Self>, display: Display<Self>) -> Self {
+    pub fn new(event_loop: &mut EventLoop<'static, Self>, display: Display<Self>) -> Self {
         let start_time = Instant::now();
         let dh = display.handle();
         let config = Config::load();
@@ -123,6 +148,9 @@ impl CanvasWM {
         let data_device_state = DataDeviceState::new::<Self>(&dh);
         let primary_selection_state = PrimarySelectionState::new::<Self>(&dh);
         let viewporter_state = ViewporterState::new::<Self>(&dh);
+        let session_lock_state = SessionLockManagerState::new::<Self, _>(&dh, |_| true);
+        let foreign_toplevel_state = ForeignToplevelListState::new::<Self>(&dh);
+        let xwayland_shell_state = XWaylandShellState::new::<Self>(&dh);
 
         let mut seat_state = SeatState::new();
         let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, "canvaswm");
@@ -135,6 +163,7 @@ impl CanvasWM {
         seat.add_pointer();
 
         let space = Space::default();
+        let loop_handle = event_loop.handle();
         let socket_name = Self::init_wayland_listener(display, event_loop);
         let loop_signal = event_loop.get_signal();
 
@@ -152,6 +181,7 @@ impl CanvasWM {
         Self {
             start_time,
             display_handle: dh,
+            loop_handle,
             space,
             loop_signal,
             socket_name,
@@ -165,9 +195,13 @@ impl CanvasWM {
             active_focus: false,
             edge_pan_velocity: None,
             fullscreen: None,
+            locked: false,
+            toplevel_handles: Vec::new(),
             state_file_last_write: start_time,
             ipc_listener,
             xwm: None,
+            gesture_pinch_last_scale: 1.0,
+            gesture_swipe_fingers: 0,
             compositor_state,
             xdg_shell_state,
             xdg_decoration_state,
@@ -178,6 +212,9 @@ impl CanvasWM {
             data_device_state,
             primary_selection_state,
             viewporter_state,
+            session_lock_state,
+            foreign_toplevel_state,
+            xwayland_shell_state,
             popups,
             seat,
         }
@@ -185,7 +222,7 @@ impl CanvasWM {
 
     fn init_wayland_listener(
         display: Display<CanvasWM>,
-        event_loop: &mut EventLoop<Self>,
+        event_loop: &mut EventLoop<'static, Self>,
     ) -> OsString {
         let listening_socket = ListeningSocketSource::new_auto().unwrap();
         let socket_name = listening_socket.socket_name().to_os_string();
@@ -230,9 +267,42 @@ impl CanvasWM {
             })
     }
 
-    /// Bounding box of all windows in canvas space.
+    /// Returns true if **window** is a widget (immovable, excluded from navigation).
+    pub fn is_widget(&self, window: &Window) -> bool {
+        let (app_id, title) = window_app_id_title(window);
+        self.config
+            .window_rules
+            .iter()
+            .any(|rule| rule.widget == Some(true) && rule_matches(rule, &app_id, &title))
+    }
+
+    /// Returns the opacity override for a window (1.0 if unset).
+    pub fn window_opacity(&self, window: &Window) -> f32 {
+        let (app_id, title) = window_app_id_title(window);
+        self.config
+            .window_rules
+            .iter()
+            .filter(|r| rule_matches(r, &app_id, &title))
+            .filter_map(|r| r.opacity)
+            .next()
+            .unwrap_or(1.0) as f32
+    }
+
+    /// Returns true if blur is enabled for this window.
+    pub fn window_blur(&self, window: &Window) -> bool {
+        let (app_id, title) = window_app_id_title(window);
+        self.config
+            .window_rules
+            .iter()
+            .any(|r| r.blur == Some(true) && rule_matches(r, &app_id, &title))
+    }
+
+    /// Bounding box of all non-widget windows in canvas space.
     pub fn all_windows_bbox(&self) -> Option<(f64, f64, f64, f64)> {
         canvaswm_canvas::all_windows_bbox(self.space.elements().filter_map(|w| {
+            if self.is_widget(w) {
+                return None;
+            }
             let loc = self.space.element_location(w)?;
             let size = w.geometry().size;
             Some((loc.x, loc.y, size.w, size.h))
@@ -246,15 +316,21 @@ impl CanvasWM {
         self.active_focus = true;
     }
 
-    /// Cycle windows forward in focus history.
+    /// Cycle windows forward in focus history (skips widget windows).
     pub fn cycle_forward(&mut self) {
-        if self.focus_history.is_empty() {
+        let candidates: Vec<Window> = self
+            .focus_history
+            .iter()
+            .filter(|w| !self.is_widget(w))
+            .cloned()
+            .collect();
+        if candidates.is_empty() {
             return;
         }
         let idx = match self.cycle_state {
-            Some(i) => (i + 1) % self.focus_history.len(),
+            Some(i) => (i + 1) % candidates.len(),
             None => {
-                if self.focus_history.len() > 1 {
+                if candidates.len() > 1 {
                     1
                 } else {
                     0
@@ -262,7 +338,7 @@ impl CanvasWM {
             }
         };
         self.cycle_state = Some(idx);
-        if let Some(window) = self.focus_history.get(idx).cloned() {
+        if let Some(window) = candidates.get(idx).cloned() {
             self.active_focus = true;
             let serial = smithay::utils::SERIAL_COUNTER.next_serial();
             self.space.raise_element(&window, true);
@@ -272,7 +348,6 @@ impl CanvasWM {
                     .unwrap()
                     .set_focus(self, Some(surface), serial);
             }
-            // Animate to window center
             if let Some(loc) = self.space.element_location(&window) {
                 let size = window.geometry().size;
                 let cx = loc.x as f64 + size.w as f64 / 2.0;
@@ -282,17 +357,23 @@ impl CanvasWM {
         }
     }
 
-    /// Cycle windows backward in focus history.
+    /// Cycle windows backward in focus history (skips widget windows).
     pub fn cycle_backward(&mut self) {
-        if self.focus_history.is_empty() {
+        let candidates: Vec<Window> = self
+            .focus_history
+            .iter()
+            .filter(|w| !self.is_widget(w))
+            .cloned()
+            .collect();
+        if candidates.is_empty() {
             return;
         }
         let idx = match self.cycle_state {
-            Some(0) | None => self.focus_history.len().saturating_sub(1),
+            Some(0) | None => candidates.len().saturating_sub(1),
             Some(i) => i - 1,
         };
         self.cycle_state = Some(idx);
-        if let Some(window) = self.focus_history.get(idx).cloned() {
+        if let Some(window) = candidates.get(idx).cloned() {
             self.active_focus = true;
             let serial = smithay::utils::SERIAL_COUNTER.next_serial();
             self.space.raise_element(&window, true);
@@ -322,6 +403,7 @@ impl CanvasWM {
     }
 
     /// Navigate to the nearest window in a direction from the focused window.
+    /// Widget windows are excluded from navigation.
     pub fn navigate_direction(&mut self, dir: (f64, f64)) {
         let focused = self.focus_history.first().cloned();
         let origin = focused.as_ref().and_then(|w| {
@@ -342,6 +424,9 @@ impl CanvasWM {
         };
 
         let items = self.space.elements().filter_map(|w| {
+            if self.is_widget(w) {
+                return None;
+            }
             let loc = self.space.element_location(w)?;
             let size = w.geometry().size;
             Some((
@@ -369,6 +454,15 @@ impl CanvasWM {
                 let cy = loc.y as f64 + size.h as f64 / 2.0;
                 self.viewport.animate_to_window(cx, cy, 1.0);
             }
+        }
+    }
+
+    /// Jump the viewport to a canvas anchor by index (Super+1..4).
+    pub fn go_to_anchor(&mut self, index: usize) {
+        let anchors = &self.config.navigation.anchors;
+        if let Some(&[x, y]) = anchors.get(index) {
+            // Config uses Y-up; compositor uses Y-down — negate Y
+            self.viewport.animate_to(x, -y);
         }
     }
 
@@ -461,6 +555,78 @@ impl CanvasWM {
             tracing::info!("Config applied");
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Free helper functions
+// ---------------------------------------------------------------------------
+
+/// Extract (app_id, title) from any window type (XDG or X11).
+pub fn window_app_id_title(window: &smithay::desktop::Window) -> (String, String) {
+    use smithay::wayland::compositor::with_states;
+    use smithay::wayland::shell::xdg::XdgToplevelSurfaceData;
+
+    if let Some(toplevel) = window.toplevel() {
+        with_states(toplevel.wl_surface(), |states| {
+            states
+                .data_map
+                .get::<XdgToplevelSurfaceData>()
+                .map(|data| {
+                    let attrs = data.lock().unwrap();
+                    (
+                        attrs.app_id.clone().unwrap_or_default(),
+                        attrs.title.clone().unwrap_or_default(),
+                    )
+                })
+                .unwrap_or_default()
+        })
+    } else {
+        (String::new(), String::new())
+    }
+}
+
+/// Check whether a window rule matches the given app_id and title.
+pub fn rule_matches(rule: &canvaswm_config::WindowRule, app_id: &str, title: &str) -> bool {
+    let app_match = rule
+        .app_id
+        .as_deref()
+        .map_or(true, |pat| glob_match(pat, app_id));
+    let title_match = rule
+        .title
+        .as_deref()
+        .map_or(true, |pat| glob_match(pat, title));
+    app_match && title_match
+}
+
+/// Simple glob matcher: `*` matches any substring, everything else is literal.
+fn glob_match(pattern: &str, value: &str) -> bool {
+    if pattern == "*" {
+        return true;
+    }
+    if !pattern.contains('*') {
+        return pattern == value;
+    }
+    let parts: Vec<&str> = pattern.split('*').collect();
+    let mut pos = 0usize;
+    for (i, part) in parts.iter().enumerate() {
+        if part.is_empty() {
+            continue;
+        }
+        if i == 0 {
+            if !value.starts_with(part) {
+                return false;
+            }
+            pos = part.len();
+        } else if i == parts.len() - 1 {
+            return value[pos..].ends_with(part);
+        } else {
+            match value[pos..].find(part) {
+                Some(idx) => pos += idx + part.len(),
+                None => return false,
+            }
+        }
+    }
+    true
 }
 
 #[derive(Default)]

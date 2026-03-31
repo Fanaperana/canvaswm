@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# canvaswm-msg — send IPC commands to a running CanvasWM instance.
+#
+# Usage:
+#   canvaswm-msg <command> [options]
+#
+# Commands:
+#   get_state                    Print viewport position, zoom, and window count
+#   get_windows                  List all mapped windows
+#   focus_window <index>          Focus window by index
+#   set_zoom <factor>             Set zoom level (e.g. 0.5, 1.0)
+#   pan_to <x> <y>               Pan camera to (x, y) in canvas space
+#   navigate <left|right|up|down> Pan by one step in a direction
+#   list_anchors                 List configured canvas anchors
+#   go_to_anchor <index>          Jump to a named canvas anchor (0-based)
+#   list_rules                   Show active window rules from config
+#   get_output_info              Show connected outputs and their modes
+#   reload_config                Hot-reload canvaswm.toml
+#
+# Examples:
+#   canvaswm-msg get_state
+#   canvaswm-msg set_zoom 0.5
+#   canvaswm-msg go_to_anchor 0
+#   canvaswm-msg pan_to 1000 500
+
+set -euo pipefail
+
+SOCK="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/canvaswm.sock"
+
+die() { echo "error: $*" >&2; exit 1; }
+
+[[ -S "$SOCK" ]] || die "canvaswm is not running (socket not found: $SOCK)"
+
+send_json() {
+    local json="$1"
+    printf '%s\n' "$json" | nc -U -q 1 "$SOCK"
+}
+
+cmd="${1:-}"
+shift || true
+
+case "$cmd" in
+    get_state)
+        send_json '{"cmd":"get_state"}'
+        ;;
+    get_windows)
+        send_json '{"cmd":"get_windows"}'
+        ;;
+    focus_window)
+        [[ $# -ge 1 ]] || die "Usage: canvaswm-msg focus_window <index>"
+        send_json "{\"cmd\":\"focus_window\",\"id\":$1}"
+        ;;
+    set_zoom)
+        [[ $# -ge 1 ]] || die "Usage: canvaswm-msg set_zoom <factor>"
+        send_json "{\"cmd\":\"set_zoom\",\"zoom\":$1}"
+        ;;
+    pan_to)
+        [[ $# -ge 2 ]] || die "Usage: canvaswm-msg pan_to <x> <y>"
+        send_json "{\"cmd\":\"pan_to\",\"x\":$1,\"y\":$2}"
+        ;;
+    navigate)
+        [[ $# -ge 1 ]] || die "Usage: canvaswm-msg navigate <left|right|up|down>"
+        send_json "{\"cmd\":\"navigate\",\"direction\":\"$1\"}"
+        ;;
+    list_anchors)
+        send_json '{"cmd":"list_anchors"}'
+        ;;
+    go_to_anchor)
+        [[ $# -ge 1 ]] || die "Usage: canvaswm-msg go_to_anchor <index>"
+        send_json "{\"cmd\":\"go_to_anchor\",\"id\":$1}"
+        ;;
+    list_rules)
+        send_json '{"cmd":"list_rules"}'
+        ;;
+    get_output_info)
+        send_json '{"cmd":"get_output_info"}'
+        ;;
+    reload_config)
+        send_json '{"cmd":"reload_config"}'
+        ;;
+    ""|help|--help|-h)
+        head -n 30 "$0" | grep '^#' | sed 's/^# \?//'
+        exit 0
+        ;;
+    *)
+        die "Unknown command: '$cmd'. Run 'canvaswm-msg help' for usage."
+        ;;
+esac

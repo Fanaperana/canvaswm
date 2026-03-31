@@ -9,9 +9,13 @@
 //! - `{"cmd": "get_windows"}` — list all windows with positions/sizes
 //! - `{"cmd": "focus_window", "id": N}` — focus window by index
 //! - `{"cmd": "set_zoom", "zoom": 0.5}` — set zoom level
-//! - `{"cmd": "pan_to", "x": 100, "y": 200}` — pan camera
+//! - `{"cmd": "pan_to", "x": 100, "y": 200}` — pan camera to absolute position
 //! - `{"cmd": "reload_config"}` — hot-reload config
-//! - `{"cmd": "navigate", "direction": "left|right|up|down"}`
+//! - `{"cmd": "navigate", "direction": "left|right|up|down"}` — pan in steps
+//! - `{"cmd": "list_anchors"}` — list configured canvas anchors
+//! - `{"cmd": "go_to_anchor", "id": N}` — jump to anchor N
+//! - `{"cmd": "list_rules"}` — list window rules from config
+//! - `{"cmd": "get_output_info"}` — list connected outputs and their modes
 
 use serde::{Deserialize, Serialize};
 
@@ -266,6 +270,69 @@ fn handle_request(req: &IpcRequest, state: &mut CanvasWM) -> IpcResponse {
                 _ => return IpcResponse::error(format!("Unknown direction: {dir}")),
             }
             IpcResponse::ok()
+        }
+        "list_anchors" => {
+            let anchors: Vec<serde_json::Value> = state
+                .config
+                .navigation
+                .anchors
+                .iter()
+                .enumerate()
+                .map(|(i, &[x, y])| {
+                    serde_json::json!({ "index": i, "x": x, "y": y })
+                })
+                .collect();
+            IpcResponse::success(anchors)
+        }
+        "go_to_anchor" => {
+            let Some(idx) = req.id else {
+                return IpcResponse::error("missing 'id' field (anchor index)");
+            };
+            state.go_to_anchor(idx);
+            IpcResponse::ok()
+        }
+        "list_rules" => {
+            let rules: Vec<serde_json::Value> = state
+                .config
+                .window_rules
+                .iter()
+                .map(|r| {
+                    let mut obj = serde_json::Map::new();
+                    if let Some(ref s) = r.app_id {
+                        obj.insert("app_id".into(), s.clone().into());
+                    }
+                    if let Some(ref s) = r.title {
+                        obj.insert("title".into(), s.clone().into());
+                    }
+                    if let Some(v) = r.opacity {
+                        obj.insert("opacity".into(), v.into());
+                    }
+                    if let Some(v) = r.blur {
+                        obj.insert("blur".into(), v.into());
+                    }
+                    if let Some(v) = r.widget {
+                        obj.insert("widget".into(), v.into());
+                    }
+                    serde_json::Value::Object(obj)
+                })
+                .collect();
+            IpcResponse::success(rules)
+        }
+        "get_output_info" => {
+            let outputs: Vec<serde_json::Value> = state
+                .space
+                .outputs()
+                .map(|o| {
+                    let mode = o.current_mode();
+                    serde_json::json!({
+                        "name": o.name(),
+                        "width":  mode.map(|m| m.size.w).unwrap_or(0),
+                        "height": mode.map(|m| m.size.h).unwrap_or(0),
+                        "refresh_mhz": mode.map(|m| m.refresh).unwrap_or(0),
+                    })
+                })
+                .collect();
+            IpcResponse::success(outputs)
         }
         other => IpcResponse::error(format!("Unknown command: {other}")),
     }

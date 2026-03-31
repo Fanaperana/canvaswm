@@ -25,6 +25,8 @@ use smithay::{
 pub enum CanvasRenderElement {
     /// Window surface scaled by the viewport zoom factor.
     Rescaled(RescaleRenderElement<WaylandSurfaceRenderElement<GlesRenderer>>),
+    /// Unscaled surface (e.g. layer-shell surfaces fixed to screen edges).
+    Surface(WaylandSurfaceRenderElement<GlesRenderer>),
     /// Small solid-colour quads (dot grid, minimap rectangles).
     SolidColor(SolidColorRenderElement),
     /// GLSL pixel shader quads (background, decorations, corner clips).
@@ -41,6 +43,7 @@ impl Element for CanvasRenderElement {
     fn id(&self) -> &Id {
         match self {
             Self::Rescaled(e) => e.id(),
+            Self::Surface(e) => e.id(),
             Self::SolidColor(e) => e.id(),
             Self::Shader(e) => e.id(),
             Self::MemoryBuf(e) => e.id(),
@@ -50,6 +53,7 @@ impl Element for CanvasRenderElement {
     fn current_commit(&self) -> CommitCounter {
         match self {
             Self::Rescaled(e) => e.current_commit(),
+            Self::Surface(e) => e.current_commit(),
             Self::SolidColor(e) => e.current_commit(),
             Self::Shader(e) => e.current_commit(),
             Self::MemoryBuf(e) => e.current_commit(),
@@ -59,6 +63,7 @@ impl Element for CanvasRenderElement {
     fn src(&self) -> Rectangle<f64, Buffer> {
         match self {
             Self::Rescaled(e) => e.src(),
+            Self::Surface(e) => e.src(),
             Self::SolidColor(e) => e.src(),
             Self::Shader(e) => e.src(),
             Self::MemoryBuf(e) => e.src(),
@@ -68,6 +73,7 @@ impl Element for CanvasRenderElement {
     fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, Physical> {
         match self {
             Self::Rescaled(e) => e.geometry(scale),
+            Self::Surface(e) => e.geometry(scale),
             Self::SolidColor(e) => e.geometry(scale),
             Self::Shader(e) => e.geometry(scale),
             Self::MemoryBuf(e) => e.geometry(scale),
@@ -77,6 +83,7 @@ impl Element for CanvasRenderElement {
     fn transform(&self) -> Transform {
         match self {
             Self::Rescaled(e) => e.transform(),
+            Self::Surface(e) => e.transform(),
             Self::SolidColor(e) => e.transform(),
             Self::Shader(e) => e.transform(),
             Self::MemoryBuf(e) => e.transform(),
@@ -90,6 +97,7 @@ impl Element for CanvasRenderElement {
     ) -> DamageSet<i32, Physical> {
         match self {
             Self::Rescaled(e) => e.damage_since(scale, commit),
+            Self::Surface(e) => e.damage_since(scale, commit),
             Self::SolidColor(e) => e.damage_since(scale, commit),
             Self::Shader(e) => e.damage_since(scale, commit),
             Self::MemoryBuf(e) => e.damage_since(scale, commit),
@@ -99,6 +107,7 @@ impl Element for CanvasRenderElement {
     fn opaque_regions(&self, scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
         match self {
             Self::Rescaled(e) => e.opaque_regions(scale),
+            Self::Surface(e) => e.opaque_regions(scale),
             Self::SolidColor(e) => e.opaque_regions(scale),
             Self::Shader(e) => e.opaque_regions(scale),
             Self::MemoryBuf(e) => e.opaque_regions(scale),
@@ -108,6 +117,7 @@ impl Element for CanvasRenderElement {
     fn alpha(&self) -> f32 {
         match self {
             Self::Rescaled(e) => e.alpha(),
+            Self::Surface(e) => e.alpha(),
             Self::SolidColor(e) => e.alpha(),
             Self::Shader(e) => e.alpha(),
             Self::MemoryBuf(e) => e.alpha(),
@@ -117,6 +127,7 @@ impl Element for CanvasRenderElement {
     fn kind(&self) -> Kind {
         match self {
             Self::Rescaled(e) => e.kind(),
+            Self::Surface(e) => e.kind(),
             Self::SolidColor(e) => e.kind(),
             Self::Shader(e) => e.kind(),
             Self::MemoryBuf(e) => e.kind(),
@@ -139,6 +150,9 @@ impl RenderElement<GlesRenderer> for CanvasRenderElement {
     ) -> Result<(), GlesError> {
         match self {
             Self::Rescaled(e) => e.draw(frame, src, dst, damage, opaque_regions),
+            Self::Surface(e) => {
+                RenderElement::<GlesRenderer>::draw(e, frame, src, dst, damage, opaque_regions)
+            }
             Self::SolidColor(e) => {
                 RenderElement::<GlesRenderer>::draw(e, frame, src, dst, damage, opaque_regions)
             }
@@ -154,6 +168,9 @@ impl RenderElement<GlesRenderer> for CanvasRenderElement {
     fn underlying_storage(&self, renderer: &mut GlesRenderer) -> Option<UnderlyingStorage<'_>> {
         match self {
             Self::Rescaled(e) => e.underlying_storage(renderer),
+            Self::Surface(e) => {
+                RenderElement::<GlesRenderer>::underlying_storage(e, renderer)
+            }
             Self::SolidColor(e) => {
                 RenderElement::<GlesRenderer>::underlying_storage(e, renderer)
             }
@@ -192,5 +209,11 @@ impl From<PixelShaderElement> for CanvasRenderElement {
 impl From<MemoryRenderBufferRenderElement<GlesRenderer>> for CanvasRenderElement {
     fn from(e: MemoryRenderBufferRenderElement<GlesRenderer>) -> Self {
         Self::MemoryBuf(e)
+    }
+}
+
+impl From<WaylandSurfaceRenderElement<GlesRenderer>> for CanvasRenderElement {
+    fn from(e: WaylandSurfaceRenderElement<GlesRenderer>) -> Self {
+        Self::Surface(e)
     }
 }

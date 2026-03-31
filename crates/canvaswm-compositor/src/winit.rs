@@ -182,18 +182,43 @@ pub fn init_winit(
                         let windows = collect_window_infos(state, zoom);
                         let params = build_deco_params(state);
 
-                        let deco_elements = match deco_shaders {
-                            Some(ref s) => decorations::generate_decoration_elements(
-                                s, &windows, &params, zoom,
-                            ),
-                            None => Vec::new(),
+                        let deco_elements = if params.ssd_mode {
+                            match deco_shaders {
+                                Some(ref s) => decorations::generate_decoration_elements(
+                                    s, &windows, &params, zoom,
+                                ),
+                                None => Vec::new(),
+                            }
+                        } else {
+                            // In CSD mode: only draw shadows (borders/title handled by client)
+                            match deco_shaders {
+                                Some(ref s) => {
+                                    let shadow_only = DecorationParams {
+                                        border_width: 0.0,
+                                        ssd_mode: false,
+                                        ..params.clone()
+                                    };
+                                    decorations::generate_decoration_elements(
+                                        s,
+                                        &windows,
+                                        &shadow_only,
+                                        zoom,
+                                    )
+                                }
+                                None => Vec::new(),
+                            }
                         };
 
-                        let corner_clip_elements = match deco_shaders {
-                            Some(ref s) => decorations::generate_corner_clip_elements(
-                                s, &windows, &params, zoom,
-                            ),
-                            None => Vec::new(),
+                        let corner_clip_elements = if params.ssd_mode {
+                            match deco_shaders {
+                                Some(ref s) => decorations::generate_corner_clip_elements(
+                                    s, &windows, &params, zoom,
+                                ),
+                                None => Vec::new(),
+                            }
+                        } else {
+                            // In CSD mode the client handles its own corner rounding
+                            Vec::new()
                         };
 
                         // 4. Minimap

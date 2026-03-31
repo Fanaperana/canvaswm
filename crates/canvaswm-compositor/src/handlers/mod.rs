@@ -14,8 +14,11 @@ use smithay::wayland::selection::data_device::{
     set_data_device_focus, ClientDndGrabHandler, DataDeviceHandler, DataDeviceState,
     ServerDndGrabHandler,
 };
+use smithay::wayland::selection::primary_selection::{
+    set_primary_focus, PrimarySelectionHandler, PrimarySelectionState,
+};
 use smithay::wayland::selection::SelectionHandler;
-use smithay::{delegate_data_device, delegate_output, delegate_seat};
+use smithay::{delegate_data_device, delegate_output, delegate_primary_selection, delegate_seat, delegate_viewporter};
 
 impl SeatHandler for CanvasWM {
     type KeyboardFocus = WlSurface;
@@ -36,7 +39,8 @@ impl SeatHandler for CanvasWM {
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
         let dh = &self.display_handle;
         let client = focused.and_then(|s| dh.get_client(s.id()).ok());
-        set_data_device_focus(dh, seat, client);
+        set_data_device_focus(dh, seat, client.clone());
+        set_primary_focus(dh, seat, client);
     }
 }
 
@@ -57,5 +61,13 @@ impl ServerDndGrabHandler for CanvasWM {}
 
 delegate_data_device!(CanvasWM);
 
+impl PrimarySelectionHandler for CanvasWM {
+    fn primary_selection_state(&self) -> &PrimarySelectionState {
+        &self.primary_selection_state
+    }
+}
+delegate_primary_selection!(CanvasWM);
+
 impl OutputHandler for CanvasWM {}
 delegate_output!(CanvasWM);
+delegate_viewporter!(CanvasWM);

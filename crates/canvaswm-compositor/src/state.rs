@@ -15,13 +15,14 @@ use smithay::{
     wayland::{
         compositor::{CompositorClientState, CompositorState},
         output::OutputManagerState,
-        selection::data_device::DataDeviceState,
+        selection::{data_device::DataDeviceState, primary_selection::PrimarySelectionState},
         shell::{
             wlr_layer::WlrLayerShellState,
             xdg::{decoration::XdgDecorationState, XdgShellState},
         },
         shm::ShmState,
         socket::ListeningSocketSource,
+        viewporter::ViewporterState,
     },
 };
 
@@ -90,6 +91,8 @@ pub struct CanvasWM {
     pub output_manager_state: OutputManagerState,
     pub seat_state: SeatState<CanvasWM>,
     pub data_device_state: DataDeviceState,
+    pub primary_selection_state: PrimarySelectionState,
+    pub viewporter_state: ViewporterState,
     pub popups: PopupManager,
 
     pub seat: Seat<Self>,
@@ -118,6 +121,8 @@ impl CanvasWM {
         let popups = PopupManager::default();
         let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(&dh);
         let data_device_state = DataDeviceState::new::<Self>(&dh);
+        let primary_selection_state = PrimarySelectionState::new::<Self>(&dh);
+        let viewporter_state = ViewporterState::new::<Self>(&dh);
 
         let mut seat_state = SeatState::new();
         let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, "canvaswm");
@@ -171,6 +176,8 @@ impl CanvasWM {
             output_manager_state,
             seat_state,
             data_device_state,
+            primary_selection_state,
+            viewporter_state,
             popups,
             seat,
         }

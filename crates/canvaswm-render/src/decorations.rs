@@ -292,6 +292,7 @@ pub struct WindowInfo {
 }
 
 /// Decoration configuration extracted from the global config.
+#[derive(Clone)]
 pub struct DecorationParams {
     pub shadow_enabled: bool,
     pub shadow_radius: f32,
@@ -385,25 +386,29 @@ pub fn generate_decoration_elements(
             )));
         }
 
-        // SSD title bar
+        // SSD title bar — skip entirely when height is zero to avoid a
+        // degenerate zero-height quad that some GLES drivers render as a
+        // full-size rect filled with the title bar colour.
         if params.ssd_mode {
             let th = (params.title_height as f64 * zoom) as i32;
-            let area = Rectangle::new(
-                Point::<i32, Logical>::from((win.screen_x as i32, win.screen_y as i32 - th)),
-                Size::<i32, Logical>::from((win.screen_w, th)),
-            );
-            let uniforms = DecorationShaders::title_bar_uniforms(
-                params.title_bar_color,
-                scaled_radius / win.screen_w.max(1) as f32,
-            );
-            elements.push(CanvasRenderElement::Shader(PixelShaderElement::new(
-                shaders.title_bar.clone(),
-                area,
-                None,
-                ELEMENT_ALPHA,
-                uniforms,
-                Kind::Unspecified,
-            )));
+            if th > 0 {
+                let area = Rectangle::new(
+                    Point::<i32, Logical>::from((win.screen_x as i32, win.screen_y as i32 - th)),
+                    Size::<i32, Logical>::from((win.screen_w, th)),
+                );
+                let uniforms = DecorationShaders::title_bar_uniforms(
+                    params.title_bar_color,
+                    scaled_radius / win.screen_w.max(1) as f32,
+                );
+                elements.push(CanvasRenderElement::Shader(PixelShaderElement::new(
+                    shaders.title_bar.clone(),
+                    area,
+                    None,
+                    ELEMENT_ALPHA,
+                    uniforms,
+                    Kind::Unspecified,
+                )));
+            }
         }
     }
 

@@ -69,6 +69,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("║  Alt+Tab            Cycle windows                     ║");
     println!("║  Super+0            Reset viewport                    ║");
     println!("║  Alt+LMB drag       Move window                       ║");
+    println!("║  MMB drag           Move window (nested mode)         ║");
     println!("║  Alt+RMB drag       Resize window                     ║");
     println!("║  Super+Escape       Quit                              ║");
     println!("╚════════════════════════════════════════════════════════╝");

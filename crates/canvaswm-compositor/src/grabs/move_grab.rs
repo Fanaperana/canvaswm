@@ -78,7 +78,11 @@ impl PointerGrab<CanvasWM> for MoveSurfaceGrab {
     ) {
         handle.button(data, event);
         const BTN_LEFT: u32 = 0x110;
-        if !handle.current_pressed().contains(&BTN_LEFT) {
+        const BTN_MIDDLE: u32 = 0x112;
+        let pressed = handle.current_pressed();
+        if !pressed.contains(&BTN_LEFT) && !pressed.contains(&BTN_MIDDLE) {
+            // Resolve collisions: push overlapping windows apart
+            resolve_window_collisions(data);
             handle.unset_grab(self, data, event.serial, event.time, true);
         }
     }
@@ -173,4 +177,40 @@ impl PointerGrab<CanvasWM> for MoveSurfaceGrab {
     }
 
     fn unset(&mut self, _data: &mut CanvasWM) {}
+}
+
+/// Push overlapping windows apart after a move operation.
+pub fn resolve_window_collisions(state: &mut CanvasWM) {
+    let gap = if state.config.snap.enabled {
+        state.config.snap.gap
+    } else {
+        10.0
+    };
+
+    // Run a few iterations to fully separate
+    for _ in 0..5 {
+        let windows: Vec<_> = state
+            .space
+            .elements()
+            .filter_map(|w| {
+                let loc = state.space.element_location(w)?;
+                let size = w.geometry().size;
+                Some((loc.x as f64, loc.y as f64, size.w as f64, size.h as f64))
+            })
+            .collect();
+
+        let moves = canvaswm_canvas::resolve_collisions(&windows, gap, 1.0);
+        if moves.is_empty() {
+            break;
+        }
+
+        let elements: Vec<_> = state.space.elements().cloned().collect();
+        for (idx, nx, ny) in moves {
+            if let Some(w) = elements.get(idx) {
+                state
+                    .space
+                    .map_element(w.clone(), (nx as i32, ny as i32), false);
+            }
+        }
+    }
 }

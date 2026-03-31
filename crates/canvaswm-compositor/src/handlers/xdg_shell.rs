@@ -38,8 +38,26 @@ impl XdgShellHandler for CanvasWM {
         let center_sx = self.viewport.width / 2.0;
         let center_sy = self.viewport.height / 2.0;
         let (cx, cy) = self.viewport.screen_to_canvas(center_sx, center_sy);
-        // Offset slightly so the window center is at viewport center (approx)
-        self.space.map_element(window, (cx as i32 - 300, cy as i32 - 200), false);
+
+        // Collect existing window rects for collision avoidance
+        let existing: Vec<(f64, f64, f64, f64)> = self
+            .space
+            .elements()
+            .filter_map(|w| {
+                let loc = self.space.element_location(w)?;
+                let size = w.geometry().size;
+                Some((loc.x as f64, loc.y as f64, size.w as f64, size.h as f64))
+            })
+            .collect();
+
+        let gap = if self.config.snap.enabled {
+            self.config.snap.gap
+        } else {
+            20.0
+        };
+        let (nx, ny) = canvaswm_canvas::find_free_position(cx, cy, 0.0, 0.0, &existing, gap);
+        self.space
+            .map_element(window, (nx as i32, ny as i32), false);
     }
 
     fn new_popup(&mut self, surface: PopupSurface, _positioner: PositionerState) {

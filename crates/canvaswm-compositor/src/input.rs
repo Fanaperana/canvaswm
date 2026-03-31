@@ -23,6 +23,7 @@ use crate::{
 /// Mouse button codes from linux/input-event-codes.h
 const BTN_LEFT: u32 = 0x110;
 const BTN_RIGHT: u32 = 0x111;
+const BTN_MIDDLE: u32 = 0x112;
 
 impl CanvasWM {
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
@@ -426,7 +427,16 @@ impl CanvasWM {
         };
 
         // Alt+LMB = move window, Alt+RMB = resize window
-        if button_state == ButtonState::Pressed && modifiers.alt && !pointer.is_grabbed() {
+        // Also: MMB = move window (works in nested compositors where Alt is intercepted)
+        let wants_move = button_state == ButtonState::Pressed
+            && !pointer.is_grabbed()
+            && ((modifiers.alt && button == BTN_LEFT) || button == BTN_MIDDLE);
+        let wants_resize = button_state == ButtonState::Pressed
+            && !pointer.is_grabbed()
+            && modifiers.alt
+            && button == BTN_RIGHT;
+
+        if wants_move || wants_resize {
             let (cx, cy) = self
                 .viewport
                 .screen_to_canvas(self.cursor_pos.x, self.cursor_pos.y);
@@ -449,7 +459,7 @@ impl CanvasWM {
                     location: canvas_pos,
                 };
 
-                if button == BTN_LEFT {
+                if wants_move {
                     let grab = MoveSurfaceGrab {
                         start_data,
                         window: window.clone(),
@@ -459,7 +469,7 @@ impl CanvasWM {
                         keyboard.set_focus(self, Some(toplevel.wl_surface().clone()), serial);
                     }
                     pointer.set_grab(self, grab, serial, Focus::Clear);
-                } else if button == BTN_RIGHT {
+                } else if wants_resize {
                     use crate::grabs::resize_grab::ResizeEdge;
                     use smithay::utils::Rectangle;
 

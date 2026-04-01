@@ -20,8 +20,19 @@ use crate::element::CanvasRenderElement;
 // Constants
 // ---------------------------------------------------------------------------
 
-/// Default shadow color (black, semi-transparent).
-const SHADOW_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.6];
+/// Focused shadow color (subtle, but visible).
+const SHADOW_COLOR_FOCUSED: [f32; 4] = [0.0, 0.0, 0.0, 0.22];
+
+/// Unfocused shadow color (lighter than focused).
+const SHADOW_COLOR_UNFOCUSED: [f32; 4] = [0.0, 0.0, 0.0, 0.14];
+
+/// Relative border width scale for active/inactive windows.
+const ACTIVE_BORDER_SCALE: f32 = 0.45;
+const INACTIVE_BORDER_SCALE: f32 = 0.45;
+
+/// Relative shadow spread scale for active/inactive windows.
+const ACTIVE_SHADOW_SCALE: f32 = 0.80;
+const INACTIVE_SHADOW_SCALE: f32 = 0.60;
 
 /// Element render alpha (fully opaque shader).
 const ELEMENT_ALPHA: f32 = 1.0;
@@ -66,6 +77,7 @@ uniform vec4 u_shadow_color;
 uniform float u_radius;
 uniform vec2 u_window_size;
 uniform float u_spread;
+uniform float u_border_width;
 
 // Approximate box shadow with rounded corners
 float roundedBoxSDF(vec2 p, vec2 b, float r) {
@@ -79,13 +91,18 @@ void main() {
     vec2 size = u_window_size + u_spread * 2.0;
     vec2 p = (uv - 0.5) * size;
     vec2 halfWin = u_window_size * 0.5;
-    
+
     float dist = roundedBoxSDF(p, halfWin, u_radius);
-    
-    // Shadow falloff — Gaussian-like
-    float shadow = 1.0 - smoothstep(0.0, u_spread, dist);
-    shadow = shadow * shadow; // softer falloff
-    
+
+    // Zero the shadow inside the window AND inside the border ring.
+    // Without this, the shadow bleeds through the semi-transparent inactive
+    // border, making it appear as a second dark ring (double-layer effect).
+    // We shift the shadow start outward by u_border_width so it only renders
+    // beyond the outer edge of the border ring.
+    float d = dist - u_border_width;
+    float shadow = step(0.0, d) * (1.0 - smoothstep(0.0, u_spread, d));
+    shadow = shadow * shadow; // softer, Gaussian-like falloff
+
     float a = u_shadow_color.a * shadow * alpha;
     gl_FragColor = vec4(u_shadow_color.rgb * a, a);
 }
@@ -115,8 +132,12 @@ void main() {
     float outer = roundedBoxSDF(p, halfSize, u_radius);
     float inner = roundedBoxSDF(p, halfSize - vec2(u_border_width), max(u_radius - u_border_width, 0.0));
     
-    // Border region: outside inner, inside outer
-    float border = smoothstep(0.5, -0.5, outer) * smoothstep(-0.5, 0.5, inner);
+    // Border region: outside inner, inside outer.
+    // Use a tighter AA band so thin borders stay crisp instead of muddy.
+    float aa = 0.35;
+    float outer_mask = 1.0 - smoothstep(-aa, aa, outer);
+    float inner_mask = smoothstep(-aa, aa, inner);
+    float border = outer_mask * inner_mask;
     
     float a = u_color.a * border * alpha;
     gl_FragColor = vec4(u_color.rgb * a, a);
@@ -144,7 +165,9 @@ void main() {
     float dist = roundedBoxSDF(p, halfSize, u_radius);
     // Inside rounded rect: transparent (window shows through)
     // Outside rounded rect (corners): background color covers sharp edges
-    float outside = smoothstep(-0.5, 0.5, dist);
+    // Start masking slightly outside the mathematical edge so we do not
+    // erode the border antialiasing band (which appears as corner "cuts").
+    float outside = smoothstep(0.5, 1.5, dist);
     float a = u_bg_color.a * outside * alpha;
     gl_FragColor = vec4(u_bg_color.rgb * a, a);
 }
@@ -169,6 +192,7 @@ impl DecorationShaders {
                     UniformName::new("u_radius", UniformType::_1f),
                     UniformName::new("u_window_size", UniformType::_2f),
                     UniformName::new("u_spread", UniformType::_1f),
+                    UniformName::new("u_border_width", UniformType::_1f),
                 ],
             )
             .map_err(|e| format!("Shadow shader: {e:?}"))?;
@@ -220,12 +244,14 @@ impl DecorationShaders {
         radius: f32,
         window_size: (f32, f32),
         spread: f32,
+        border_width: f32,
     ) -> Vec<Uniform<'static>> {
         vec![
             Uniform::new("u_shadow_color", color),
             Uniform::new("u_radius", radius),
             Uniform::new("u_window_size", [window_size.0, window_size.1]),
             Uniform::new("u_spread", spread),
+            Uniform::new("u_border_width", border_width),
         ]
     }
 
@@ -332,9 +358,25 @@ pub fn generate_decoration_elements(
             params.unfocused_color
         };
 
-        // Shadow
+        let border_scale = if win.focused {
+            ACTIVE_BORDER_SCALE
+        } else {
+            INACTIVE_BORDER_SCALE
+        };
+        let border_width = scaled_border * border_scale;
+
+        // Shadow is pushed LAST so it is furthest back in the front-to-back
+        // render order. Smithay renders elements[0] on top; shadow must be
+        // behind the border ring, not in front of it.  Collecting it first
+        // and appending after the border elements achieves this.
+        let mut shadow_elem: Option<CanvasRenderElement> = None;
         if params.shadow_enabled && params.shadow_radius > 0.0 {
-            let spread = scaled_shadow_radius;
+            let spread = scaled_shadow_radius
+                * if win.focused {
+                    ACTIVE_SHADOW_SCALE
+                } else {
+                    INACTIVE_SHADOW_SCALE
+                };
             let sx = win.screen_x as i32 - spread as i32;
             let sy = win.screen_y as i32 - spread as i32;
             let sw = win.screen_w + spread as i32 * 2;
@@ -345,12 +387,17 @@ pub fn generate_decoration_elements(
                 Size::<i32, Logical>::from((sw, sh)),
             );
             let uniforms = DecorationShaders::shadow_uniforms(
-                SHADOW_COLOR,
+                if win.focused {
+                    SHADOW_COLOR_FOCUSED
+                } else {
+                    SHADOW_COLOR_UNFOCUSED
+                },
                 scaled_radius,
                 (win.screen_w as f32, win.screen_h as f32),
                 spread,
+                border_width,
             );
-            elements.push(CanvasRenderElement::Shader(PixelShaderElement::new(
+            shadow_elem = Some(CanvasRenderElement::Shader(PixelShaderElement::new(
                 shaders.shadow.clone(),
                 area,
                 None,
@@ -362,15 +409,15 @@ pub fn generate_decoration_elements(
 
         // Border
         if params.border_width > 0.0 {
-            let bw = (scaled_border.ceil() as i32).max(MIN_SCREEN_BORDER);
+            let bw = (border_width.ceil() as i32).max(MIN_SCREEN_BORDER);
             let area = Rectangle::new(
                 Point::<i32, Logical>::from((win.screen_x as i32 - bw, win.screen_y as i32 - bw)),
                 Size::<i32, Logical>::from((win.screen_w + bw * 2, win.screen_h + bw * 2)),
             );
             let uniforms = DecorationShaders::border_uniforms(
                 border_color,
-                scaled_radius + scaled_border,
-                scaled_border,
+                scaled_radius + border_width,
+                border_width,
                 (
                     (win.screen_w + bw * 2) as f32,
                     (win.screen_h + bw * 2) as f32,
@@ -410,6 +457,12 @@ pub fn generate_decoration_elements(
                 )));
             }
         }
+
+        // Push shadow last — it must be furthest back in the front-to-back
+        // element list so the border ring renders visually on top of it.
+        if let Some(s) = shadow_elem {
+            elements.push(s);
+        }
     }
 
     elements
@@ -435,16 +488,25 @@ pub fn generate_corner_clip_elements(
     }
 
     let scaled_radius = params.corner_radius * zoom as f32;
-    let scaled_border = (params.border_width * zoom as f32).ceil() as i32;
-    let outer_radius = scaled_radius + scaled_border as f32;
+    let scaled_border = params.border_width * zoom as f32;
 
     let mut elements = Vec::with_capacity(windows.len());
 
     for win in windows {
-        let clip_x = win.bbox_screen_x as i32 - scaled_border;
-        let clip_y = win.bbox_screen_y as i32 - scaled_border;
-        let clip_w = win.bbox_screen_w + scaled_border * 2;
-        let clip_h = win.bbox_screen_h + scaled_border * 2;
+        let border_scale = if win.focused {
+            ACTIVE_BORDER_SCALE
+        } else {
+            INACTIVE_BORDER_SCALE
+        };
+        let border_px = (scaled_border * border_scale).ceil() as i32;
+        // Expand the clip radius a touch so the clip does not bite into the
+        // rounded border edge at fractional scales.
+        let outer_radius = scaled_radius + border_px as f32 + 0.75;
+
+        let clip_x = win.bbox_screen_x as i32 - border_px;
+        let clip_y = win.bbox_screen_y as i32 - border_px;
+        let clip_w = win.bbox_screen_w + border_px * 2;
+        let clip_h = win.bbox_screen_h + border_px * 2;
 
         let area = Rectangle::new(
             Point::<i32, Logical>::from((clip_x, clip_y)),

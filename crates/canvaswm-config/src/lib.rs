@@ -317,7 +317,7 @@ impl Default for EffectsConfig {
             shadows: true,
             shadow_radius: 14.0,
             corner_rounding: true,
-            corner_radius: 12.0,
+            corner_radius: 5.0,
         }
     }
 }
@@ -330,9 +330,9 @@ impl Default for BackgroundConfig {
             shader_path: None,
             image_path: None,
             image_mode: "fill".into(),
-            color: [0.118, 0.118, 0.180, 1.0], // Catppuccin Mocha base
+            color: [0.090, 0.090, 0.060, 1.0], // darker canvas base
             grid_spacing: 60.0,
-            dot_size: 2.0,
+            dot_size: 1.0,
             dot_color: [0.3, 0.3, 0.4, 0.4],
         }
     }

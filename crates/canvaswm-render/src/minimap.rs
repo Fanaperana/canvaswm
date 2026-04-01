@@ -21,7 +21,7 @@ pub const HEIGHT: i32 = 140;
 /// Distance from screen edge in screen pixels.
 pub const MARGIN: i32 = 16;
 /// Corner radius for the minimap background.
-pub const CORNER_RADIUS: f32 = 6.0;
+pub const CORNER_RADIUS: f32 = 4.0;
 
 // ---------------------------------------------------------------------------
 // Internal styling constants
@@ -34,7 +34,7 @@ const CONTENT_INSET: i32 = 2;
 /// Minimum rendered size for a window rectangle on the minimap.
 const MIN_RECT_PX: i32 = 2;
 
-const BG_COLOR: [f32; 4] = [0.05, 0.05, 0.08, 0.75];
+const BG_COLOR: [f32; 4] = [0.05, 0.05, 0.05, 0.75];
 const WINDOW_COLOR: [f32; 4] = [0.4, 0.4, 0.55, 0.8];
 const FOCUSED_COLOR: [f32; 4] = [0.5, 0.6, 0.9, 0.9];
 const VIEWPORT_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 0.35];
